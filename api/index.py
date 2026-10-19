@@ -2,7 +2,7 @@ import asyncio
 import io
 import os
 import tempfile
-from typing import List
+from typing import List, Optional
 
 import httpx
 from dotenv import load_dotenv
@@ -120,11 +120,12 @@ async def verify_recaptcha(token: str) -> bool:
 async def convert(
     request: Request,
     images: List[UploadFile] = File(..., description="Images to convert (max 10)"),
-    recaptcha_token: str = Form(..., description="reCAPTCHA v3 token"),
+    recaptcha_token: Optional[str] = Form(None, description="reCAPTCHA v3 token"),
 ):
-    # --- Validate reCAPTCHA ---
-    if not await verify_recaptcha(recaptcha_token):
-        raise HTTPException(status_code=403, detail="reCAPTCHA verification failed.")
+    # --- Validate reCAPTCHA (skipped if RECAPTCHA_SECRET_KEY is not set) ---
+    if RECAPTCHA_SECRET:
+        if not recaptcha_token or not await verify_recaptcha(recaptcha_token):
+            raise HTTPException(status_code=403, detail="reCAPTCHA verification failed.")
 
     # --- Validate image count ---
     if len(images) == 0:

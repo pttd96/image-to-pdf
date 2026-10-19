@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Image to PDF</title>
+  <link rel="stylesheet" href="style.css" />
+  <!-- reCAPTCHA v3 — replace YOUR_SITE_KEY -->
+  <script src="https://www.google.com/recaptcha/api.js?render=YOUR_RECAPTCHA_SITE_KEY" async defer></script>
+</head>
+<body>
+  <div class="container">
+    <h1>📄 Image → PDF</h1>
+    <p class="subtitle">Upload photos of your document. Get a searchable PDF.</p>
+
+    <div id="drop-zone" class="drop-zone">
+      <input type="file" id="file-input" accept="image/jpeg,image/png,image/webp" multiple hidden />
+      <div class="drop-hint">
+        <span class="icon">📷</span>
+        <p>Drag & drop images here, or <button id="browse-btn" type="button">browse</button></p>
+        <small>JPEG, PNG, WebP · max 10 images · max 10MB each</small>
+      </div>
+    </div>
+
+    <ul id="preview-list" class="preview-list"></ul>
+
+    <div class="actions">
+      <button id="convert-btn" class="btn-primary" disabled>Convert to PDF</button>
+      <button id="clear-btn" class="btn-secondary" disabled>Clear</button>
+    </div>
+
+    <div id="status" class="status hidden"></div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

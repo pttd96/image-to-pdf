@@ -24,14 +24,21 @@ MAX_IMAGE_SIZE_MB = 10
 ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
 
 
-def get_gcp_credentials():
+def get_gcp_credentials(request: Request = None):
     """
     Load GCP credentials via Workload Identity Federation.
 
-    In production (Vercel): exchanges VERCEL_OIDC_TOKEN for short-lived GCP credentials.
+    In production (Vercel):
+      1. Reads OIDC token from incoming request header `x-vercel-oidc-token`
+         or `VERCEL_OIDC_TOKEN` environment variable.
+      2. Exchanges it for short-lived GCP credentials via STS.
     In local dev: falls back to GOOGLE_CREDENTIALS_JSON (JSON string of service account key).
     """
-    oidc_token = os.getenv("VERCEL_OIDC_TOKEN")
+    oidc_token = None
+    if request:
+        oidc_token = request.headers.get("x-vercel-oidc-token")
+    if not oidc_token:
+        oidc_token = os.getenv("VERCEL_OIDC_TOKEN")
 
     if oidc_token:
         # --- Vercel production: use Workload Identity ---
@@ -131,7 +138,7 @@ async def convert(
         image_bytes_list.append(data)
 
     # --- Load GCP credentials and run OCR in parallel ---
-    credentials = get_gcp_credentials()
+    credentials = get_gcp_credentials(request)
     ocr_results = await run_ocr_parallel(image_bytes_list, credentials)
 
     # --- Build multi-page PDF ---

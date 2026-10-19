@@ -101,8 +101,15 @@ convertBtn.addEventListener("click", async () => {
   convertBtn.disabled = true;
 
   try {
-    // Get reCAPTCHA v3 token (invisible)
-    const token = await grecaptcha.execute(RECAPTCHA_SITE_KEY, { action: "convert" });
+    // Get reCAPTCHA v3 token if configured, else use fallback
+    let token = "dev_bypass_token";
+    if (typeof grecaptcha !== "undefined" && RECAPTCHA_SITE_KEY && !RECAPTCHA_SITE_KEY.startsWith("YOUR_")) {
+      try {
+        token = await grecaptcha.execute(RECAPTCHA_SITE_KEY, { action: "convert" });
+      } catch (recaptchaErr) {
+        console.warn("reCAPTCHA execution skipped or failed:", recaptchaErr);
+      }
+    }
 
     const formData = new FormData();
     files.forEach((f) => formData.append("images", f));

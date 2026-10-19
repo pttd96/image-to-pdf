@@ -11,8 +11,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from google.auth import identity_pool
 
-from ocr import run_ocr_parallel
-from pdf import build_pdf
+import sys
+from pathlib import Path
+
+# Ensure api directory is in Python path for Vercel serverless execution
+sys.path.insert(0, str(Path(__file__).parent))
+
+try:
+    from ocr import run_ocr_parallel
+    from pdf import build_pdf
+except ImportError:
+    from api.ocr import run_ocr_parallel
+    from api.pdf import build_pdf
 
 load_dotenv()
 
@@ -106,6 +116,7 @@ async def verify_recaptcha(token: str) -> bool:
 
 
 @app.post("/api/convert", summary="Convert images to a searchable PDF")
+@app.post("/convert", summary="Convert images to a searchable PDF (alias)")
 async def convert(
     request: Request,
     images: List[UploadFile] = File(..., description="Images to convert (max 10)"),
@@ -152,5 +163,6 @@ async def convert(
 
 
 @app.get("/api/health")
+@app.get("/health")
 async def health():
     return {"status": "ok"}

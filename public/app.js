@@ -1,5 +1,5 @@
 // ── Config ──────────────────────────────────────────────────────────────────
-const API_URL = "http://localhost:8000/convert"; // Change to your deployed URL
+const API_URL = "/api/convert"; // Relative — works on Vercel (same domain)
 const RECAPTCHA_SITE_KEY = "YOUR_RECAPTCHA_SITE_KEY"; // Replace with your site key
 const MAX_FILES = 10;
 const MAX_FILE_SIZE_MB = 10;

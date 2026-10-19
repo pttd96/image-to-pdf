@@ -37,12 +37,6 @@ ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
 def get_gcp_credentials(request: Request = None):
     """
     Load GCP credentials via Workload Identity Federation.
-
-    In production (Vercel):
-      1. Reads OIDC token from incoming request header `x-vercel-oidc-token`
-         or `VERCEL_OIDC_TOKEN` environment variable.
-      2. Exchanges it for short-lived GCP credentials via STS.
-    In local dev: falls back to GOOGLE_CREDENTIALS_JSON (JSON string of service account key).
     """
     oidc_token = None
     if request:
@@ -50,13 +44,22 @@ def get_gcp_credentials(request: Request = None):
     if not oidc_token:
         oidc_token = os.getenv("VERCEL_OIDC_TOKEN")
 
+    print(f"[AUTH] OIDC token found: {'yes (len=' + str(len(oidc_token)) + ')' if oidc_token else 'no'}")
+
     if oidc_token:
         # --- Vercel production: use Workload Identity ---
-        provider = os.environ["GCP_WORKLOAD_IDENTITY_PROVIDER"]
-        sa_email = os.environ["GCP_SERVICE_ACCOUNT"]
+        provider = os.getenv("GCP_WORKLOAD_IDENTITY_PROVIDER", "").strip()
+        sa_email = os.getenv("GCP_SERVICE_ACCOUNT", "").strip()
+
+        print(f"[AUTH] Provider: {provider or 'MISSING'}")
+        print(f"[AUTH] Service Account: {sa_email or 'MISSING'}")
+
+        if not provider:
+            raise RuntimeError("Environment variable 'GCP_WORKLOAD_IDENTITY_PROVIDER' is not set.")
+        if not sa_email:
+            raise RuntimeError("Environment variable 'GCP_SERVICE_ACCOUNT' is not set.")
 
         # google-auth's identity_pool requires a file or URL source.
-        # Write the short-lived OIDC token to a temp file for this request.
         with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
             f.write(oidc_token)
             token_file = f.name
@@ -81,9 +84,10 @@ def get_gcp_credentials(request: Request = None):
 
         raw = os.getenv("GOOGLE_CREDENTIALS_JSON")
         if not raw:
+            req_headers = list(request.headers.keys()) if request else []
             raise RuntimeError(
-                "Neither VERCEL_OIDC_TOKEN nor GOOGLE_CREDENTIALS_JSON is set. "
-                "Set GOOGLE_CREDENTIALS_JSON in your local .env file."
+                f"Missing GCP auth credentials. Neither OIDC token (headers: {req_headers}) "
+                "nor GOOGLE_CREDENTIALS_JSON is available."
             )
         info = json.loads(raw)
         return service_account.Credentials.from_service_account_info(
@@ -96,8 +100,8 @@ app = FastAPI(title="Image to PDF API", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Tighten to your Vercel domain in production
-    allow_methods=["POST", "GET"],
+    allow_origins=["*"],
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
@@ -105,7 +109,7 @@ app.add_middleware(
 async def verify_recaptcha(token: str) -> bool:
     """Verify reCAPTCHA v3 token. Returns True if score >= 0.5."""
     if not RECAPTCHA_SECRET:
-        return True  # Skip verification in local dev if secret not set
+        return True
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             RECAPTCHA_VERIFY_URL,
@@ -125,45 +129,62 @@ async def convert(
     images: List[UploadFile] = File(..., description="Images to convert (max 10)"),
     recaptcha_token: Optional[str] = Form(None, description="reCAPTCHA v3 token"),
 ):
-    # --- Validate reCAPTCHA (skipped if RECAPTCHA_SECRET_KEY is not set) ---
-    if RECAPTCHA_SECRET:
-        if not recaptcha_token or not await verify_recaptcha(recaptcha_token):
-            raise HTTPException(status_code=403, detail="reCAPTCHA verification failed.")
+    try:
+        print(f"[CONVERT] Starting conversion for {len(images)} images...")
 
-    # --- Validate image count ---
-    if len(images) == 0:
-        raise HTTPException(status_code=400, detail="At least one image is required.")
-    if len(images) > MAX_IMAGES:
-        raise HTTPException(status_code=400, detail=f"Maximum {MAX_IMAGES} images allowed.")
+        # --- Validate reCAPTCHA (skipped if RECAPTCHA_SECRET_KEY is not set) ---
+        if RECAPTCHA_SECRET:
+            if not recaptcha_token or not await verify_recaptcha(recaptcha_token):
+                raise HTTPException(status_code=403, detail="reCAPTCHA verification failed.")
 
-    # --- Read and validate each image ---
-    image_bytes_list: List[bytes] = []
-    for img in images:
-        if img.content_type not in ALLOWED_CONTENT_TYPES:
-            raise HTTPException(
-                status_code=415,
-                detail=f"Unsupported type: {img.content_type}. Use JPEG, PNG, or WebP.",
-            )
-        data = await img.read()
-        if len(data) > MAX_IMAGE_SIZE_MB * 1024 * 1024:
-            raise HTTPException(
-                status_code=413,
-                detail=f"'{img.filename}' exceeds {MAX_IMAGE_SIZE_MB}MB limit.",
-            )
-        image_bytes_list.append(data)
+        # --- Validate image count ---
+        if len(images) == 0:
+            raise HTTPException(status_code=400, detail="At least one image is required.")
+        if len(images) > MAX_IMAGES:
+            raise HTTPException(status_code=400, detail=f"Maximum {MAX_IMAGES} images allowed.")
 
-    # --- Load GCP credentials and run OCR in parallel ---
-    credentials = get_gcp_credentials(request)
-    ocr_results = await run_ocr_parallel(image_bytes_list, credentials)
+        # --- Read and validate each image ---
+        image_bytes_list: List[bytes] = []
+        for i, img in enumerate(images):
+            print(f"[CONVERT] Processing image {i+1}: {img.filename} ({img.content_type})")
+            if img.content_type not in ALLOWED_CONTENT_TYPES:
+                raise HTTPException(
+                    status_code=415,
+                    detail=f"Unsupported type: {img.content_type}. Use JPEG, PNG, or WebP.",
+                )
+            data = await img.read()
+            if len(data) > MAX_IMAGE_SIZE_MB * 1024 * 1024:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"'{img.filename}' exceeds {MAX_IMAGE_SIZE_MB}MB limit.",
+                )
+            image_bytes_list.append(data)
 
-    # --- Build multi-page PDF ---
-    pdf_bytes = build_pdf(image_bytes_list, ocr_results)
+        # --- Load GCP credentials and run OCR in parallel ---
+        print("[CONVERT] Obtaining GCP credentials...")
+        credentials = get_gcp_credentials(request)
+        print("[CONVERT] Running Google Cloud Vision OCR in parallel...")
+        ocr_results = await run_ocr_parallel(image_bytes_list, credentials)
+        print(f"[CONVERT] OCR finished. Results count: {len(ocr_results)}")
 
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={"Content-Disposition": "attachment; filename=document.pdf"},
-    )
+        # --- Build multi-page PDF ---
+        print("[CONVERT] Building PDF with fpdf2...")
+        pdf_bytes = build_pdf(image_bytes_list, ocr_results)
+        print(f"[CONVERT] PDF built successfully ({len(pdf_bytes)} bytes)")
+
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": "attachment; filename=document.pdf"},
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        error_msg = f"{type(e).__name__}: {str(e)}"
+        print(f"[CONVERT ERROR] {error_msg}")
+        raise HTTPException(status_code=500, detail=error_msg)
 
 
 @app.get("/api/health")

@@ -118,8 +118,10 @@ convertBtn.addEventListener("click", async () => {
     const response = await fetch(API_URL, { method: "POST", body: formData });
 
     if (!response.ok) {
-      const err = await response.json().catch(() => ({ detail: "Unknown error" }));
-      throw new Error(err.detail || `Server error ${response.status}`);
+      const err = await response.json().catch(() => ({ detail: `Server error ${response.status}` }));
+      let msg = err.detail || `Server error ${response.status}`;
+      if (typeof msg === "object") msg = JSON.stringify(msg);
+      throw new Error(msg);
     }
 
     // Trigger download

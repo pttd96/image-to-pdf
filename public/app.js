@@ -1,5 +1,5 @@
 // ── Config ──────────────────────────────────────────────────────────────────
-const API_URL = "/api/convert"; // Relative — works on Vercel (same domain)
+const API_URL = "/convert"; // Direct FastAPI route on Vercel
 const RECAPTCHA_SITE_KEY = "YOUR_RECAPTCHA_SITE_KEY"; // Replace with your site key
 const MAX_FILES = 10;
 const MAX_FILE_SIZE_MB = 10;

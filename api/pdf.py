@@ -59,17 +59,21 @@ def build_pdf(
 
         # --- Invisible text layer (searchable) ---
         if text:
-            pdf.set_xy(0, 0)
-            pdf.set_font("Helvetica", size=1)   # Tiny font — visually invisible
-            pdf.set_text_color(255, 255, 255)    # White text on white
-            pdf.set_fill_color(255, 255, 255)
-            # Write text in a cell covering the image area
-            pdf.multi_cell(
-                w=A4_WIDTH_MM,
-                h=2,
-                text=text,
-                border=0,
-                align="L",
-            )
+            try:
+                pdf.set_xy(0, 0)
+                pdf.set_font("Helvetica", size=1)   # Tiny font — visually invisible
+                pdf.set_text_color(255, 255, 255)    # White text on white
+                pdf.set_fill_color(255, 255, 255)
+                # Ensure text is safely encodable for core latin-1 font
+                safe_text = text.encode("latin-1", "replace").decode("latin-1")
+                pdf.multi_cell(
+                    w=A4_WIDTH_MM,
+                    h=2,
+                    text=safe_text,
+                    border=0,
+                    align="L",
+                )
+            except Exception:
+                pass
 
     return bytes(pdf.output())

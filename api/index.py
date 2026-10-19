@@ -117,6 +117,9 @@ async def verify_recaptcha(token: str) -> bool:
 
 @app.post("/api/convert", summary="Convert images to a searchable PDF")
 @app.post("/convert", summary="Convert images to a searchable PDF (alias)")
+@app.post("/api/index/convert")
+@app.post("/api/index")
+@app.post("/")
 async def convert(
     request: Request,
     images: List[UploadFile] = File(..., description="Images to convert (max 10)"),
@@ -165,5 +168,8 @@ async def convert(
 
 @app.get("/api/health")
 @app.get("/health")
+@app.get("/api/index/health")
+@app.get("/api/index")
+@app.get("/")
 async def health():
     return {"status": "ok"}

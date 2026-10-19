@@ -1,7 +1,7 @@
 import asyncio
 import io
-import json
 import os
+import tempfile
 from typing import List
 
 import httpx
@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
-from google.oauth2 import service_account
+from google.auth import identity_pool
 
 from ocr import run_ocr_parallel
 from pdf import build_pdf
@@ -26,17 +26,53 @@ ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
 
 def get_gcp_credentials():
     """
-    Load Google Cloud credentials from env var (Vercel-compatible).
-    Set GOOGLE_CREDENTIALS_JSON to the full contents of your service account JSON.
+    Load GCP credentials via Workload Identity Federation.
+
+    In production (Vercel): exchanges VERCEL_OIDC_TOKEN for short-lived GCP credentials.
+    In local dev: falls back to GOOGLE_CREDENTIALS_JSON (JSON string of service account key).
     """
-    raw = os.getenv("GOOGLE_CREDENTIALS_JSON")
-    if not raw:
-        raise RuntimeError("GOOGLE_CREDENTIALS_JSON environment variable is not set.")
-    info = json.loads(raw)
-    return service_account.Credentials.from_service_account_info(
-        info,
-        scopes=["https://www.googleapis.com/auth/cloud-platform"],
-    )
+    oidc_token = os.getenv("VERCEL_OIDC_TOKEN")
+
+    if oidc_token:
+        # --- Vercel production: use Workload Identity ---
+        provider = os.environ["GCP_WORKLOAD_IDENTITY_PROVIDER"]
+        sa_email = os.environ["GCP_SERVICE_ACCOUNT"]
+
+        # google-auth's identity_pool requires a file or URL source.
+        # Write the short-lived OIDC token to a temp file for this request.
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write(oidc_token)
+            token_file = f.name
+
+        return identity_pool.Credentials.from_info(
+            {
+                "type": "external_account",
+                "audience": f"//iam.googleapis.com/{provider}",
+                "subject_token_type": "urn:ietf:params:oauth:token-type:id_token",
+                "token_url": "https://sts.googleapis.com/v1/token",
+                "service_account_impersonation_url": (
+                    f"https://iamcredentials.googleapis.com/v1/projects/-"
+                    f"/serviceAccounts/{sa_email}:generateAccessToken"
+                ),
+                "credential_source": {"file": token_file},
+            }
+        )
+    else:
+        # --- Local dev: use JSON service account key ---
+        import json
+        from google.oauth2 import service_account
+
+        raw = os.getenv("GOOGLE_CREDENTIALS_JSON")
+        if not raw:
+            raise RuntimeError(
+                "Neither VERCEL_OIDC_TOKEN nor GOOGLE_CREDENTIALS_JSON is set. "
+                "Set GOOGLE_CREDENTIALS_JSON in your local .env file."
+            )
+        info = json.loads(raw)
+        return service_account.Credentials.from_service_account_info(
+            info,
+            scopes=["https://www.googleapis.com/auth/cloud-platform"],
+        )
 
 
 app = FastAPI(title="Image to PDF API", version="0.1.0")

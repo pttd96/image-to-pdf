@@ -12,7 +12,6 @@ BOLD_FONT = str(FONT_DIR / "Roboto-Bold.ttf")
 
 class CleanDocumentPDF(FPDF):
     def footer(self):
-        # Position 15 mm from bottom
         self.set_y(-15)
         if "Roboto" in self.fonts:
             self.set_font("Roboto", "", 9)
@@ -20,6 +19,73 @@ class CleanDocumentPDF(FPDF):
             self.set_font("Helvetica", "I", 8)
         self.set_text_color(150, 150, 150)
         self.cell(0, 10, f"Trang {self.page_no()} / {{nb}}", align="C")
+
+
+def _render_text_cell(
+    pdf: FPDF,
+    text: str,
+    font_size: float = 10.5,
+    is_bold: bool = False,
+    align: str = "L",
+    line_height: float = 5.5,
+    has_roboto: bool = True,
+):
+    """
+    Renders text safely without running out of horizontal space.
+    - Always resets X to left margin.
+    - Uses exact effective page width (pdf.epw).
+    - Enables character-level wrapping (wrapmode="CHAR") for long tokens.
+    - Auto-scales font down if text is unusually dense or wide.
+    """
+    if not text:
+        return
+
+    # Ensure cursor is at left margin
+    pdf.set_x(pdf.l_margin)
+    width = pdf.epw
+
+    if has_roboto:
+        font_family = "Roboto"
+        style = "B" if is_bold else ""
+    else:
+        font_family = "Helvetica"
+        style = "B" if is_bold else ""
+        text = text.encode("latin-1", "replace").decode("latin-1")
+
+    # Try rendering with desired font size; auto-scale down if tight
+    for size_attempt in [font_size, max(7.0, font_size - 2), 6.0]:
+        pdf.set_font(font_family, style, size_attempt)
+        pdf.set_x(pdf.l_margin)
+        try:
+            pdf.multi_cell(
+                w=width,
+                h=line_height,
+                text=text,
+                align=align,
+                wrapmode="CHAR",
+                new_x="LMARGIN",
+                new_y="NEXT",
+            )
+            return
+        except Exception:
+            pdf.set_x(pdf.l_margin)
+            continue
+
+    # Final emergency fallback: truncate line if extreme
+    try:
+        pdf.set_font(font_family, style, 6.0)
+        pdf.set_x(pdf.l_margin)
+        pdf.multi_cell(
+            w=width,
+            h=line_height,
+            text=text[:150],
+            align="L",
+            wrapmode="CHAR",
+            new_x="LMARGIN",
+            new_y="NEXT",
+        )
+    except Exception as e:
+        print(f"[PDF] Could not render line: {e}")
 
 
 def build_pdf(
@@ -31,6 +97,7 @@ def build_pdf(
 
     - Pure white A4 background (no camera photos, shadows, or artifacts).
     - TrueType Unicode typography (Roboto) supporting Vietnamese & English.
+    - Safe auto-scaled text rendering (no horizontal space errors).
     - Professional document margins, paragraph spacing, and centered headings.
     - Automatic page numbering.
 
@@ -54,25 +121,26 @@ def build_pdf(
 
     for idx, text in enumerate(ocr_texts):
         pdf.add_page()
+        pdf.set_x(pdf.l_margin)
 
         if not text or not text.strip():
-            # If no text detected for this page
-            if has_roboto:
-                pdf.set_font("Roboto", "", 10)
-                pdf.set_text_color(160, 160, 160)
-            else:
-                pdf.set_font("Helvetica", "I", 10)
-            pdf.cell(0, 10, "[Không nhận diện được nội dung văn bản]", align="C")
+            _render_text_cell(
+                pdf=pdf,
+                text="[Không nhận diện được nội dung văn bản]",
+                font_size=10.0,
+                align="C",
+                has_roboto=has_roboto,
+            )
             continue
 
         lines = text.split("\n")
         for line in lines:
             line_str = line.strip()
             if not line_str:
-                pdf.ln(3)  # Paragraph gap
+                pdf.ln(2.5)
+                pdf.set_x(pdf.l_margin)
                 continue
 
-            # Detect common contract headers, national emblems, titles, and articles
             upper_line = line_str.upper()
             is_national_motto = (
                 "CỘNG HÒA" in upper_line
@@ -97,39 +165,51 @@ def build_pdf(
                 or line_str.startswith("CHƯƠNG ")
             )
 
-            is_header = is_national_motto or is_contract_title or is_article_heading
-
-            if has_roboto:
-                if is_contract_title:
-                    pdf.set_font("Roboto", "B", 14)
-                    pdf.set_text_color(15, 15, 15)
-                    pdf.multi_cell(0, 7, line_str, align="C")
-                    pdf.ln(2)
-                elif is_national_motto:
-                    pdf.set_font("Roboto", "B", 11)
-                    pdf.set_text_color(25, 25, 25)
-                    pdf.multi_cell(0, 6, line_str, align="C")
-                    pdf.ln(1)
-                elif is_article_heading:
-                    pdf.ln(2)
-                    pdf.set_font("Roboto", "B", 11.5)
-                    pdf.set_text_color(20, 20, 20)
-                    pdf.multi_cell(0, 6, line_str, align="L")
-                    pdf.ln(1)
-                elif is_header:
-                    pdf.set_font("Roboto", "B", 11)
-                    pdf.set_text_color(20, 20, 20)
-                    pdf.multi_cell(0, 5.8, line_str, align="L")
-                else:
-                    pdf.set_font("Roboto", "", 10.5)
-                    pdf.set_text_color(35, 35, 35)
-                    # Justify longer paragraph lines, left-align short lines
-                    align = "J" if len(line_str) > 60 else "L"
-                    pdf.multi_cell(0, 5.6, line_str, align=align)
+            if is_contract_title:
+                pdf.set_text_color(15, 15, 15)
+                _render_text_cell(
+                    pdf=pdf,
+                    text=line_str,
+                    font_size=13.0,
+                    is_bold=True,
+                    align="C",
+                    line_height=6.5,
+                    has_roboto=has_roboto,
+                )
+                pdf.ln(1.5)
+            elif is_national_motto:
+                pdf.set_text_color(25, 25, 25)
+                _render_text_cell(
+                    pdf=pdf,
+                    text=line_str,
+                    font_size=11.0,
+                    is_bold=True,
+                    align="C",
+                    line_height=5.8,
+                    has_roboto=has_roboto,
+                )
+            elif is_article_heading:
+                pdf.ln(1.5)
+                pdf.set_text_color(20, 20, 20)
+                _render_text_cell(
+                    pdf=pdf,
+                    text=line_str,
+                    font_size=11.0,
+                    is_bold=True,
+                    align="L",
+                    line_height=5.8,
+                    has_roboto=has_roboto,
+                )
             else:
-                # Fallback to standard core font if TTF missing
-                pdf.set_font("Helvetica", "B" if is_header else "", 10)
-                safe = line_str.encode("latin-1", "replace").decode("latin-1")
-                pdf.multi_cell(0, 5.5, safe)
+                pdf.set_text_color(35, 35, 35)
+                _render_text_cell(
+                    pdf=pdf,
+                    text=line_str,
+                    font_size=10.0,
+                    is_bold=False,
+                    align="L",
+                    line_height=5.2,
+                    has_roboto=has_roboto,
+                )
 
     return bytes(pdf.output())

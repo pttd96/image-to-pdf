@@ -1,26 +1,25 @@
-import io
+import os
+from pathlib import Path
 from typing import List, Optional
 
 from fpdf import FPDF
-from PIL import Image
 
 
-# A4 dimensions in mm
-A4_WIDTH_MM = 210
-A4_HEIGHT_MM = 297
+FONT_DIR = Path(__file__).parent / "fonts"
+REGULAR_FONT = str(FONT_DIR / "Roboto-Regular.ttf")
+BOLD_FONT = str(FONT_DIR / "Roboto-Bold.ttf")
 
 
-def _image_bytes_to_temp_png(image_bytes: bytes) -> tuple[bytes, int, int]:
-    """
-    Converts raw image bytes to PNG (ensuring compatibility with fpdf2)
-    and returns (png_bytes, width_px, height_px).
-    """
-    with Image.open(io.BytesIO(image_bytes)) as img:
-        img = img.convert("RGB")
-        width, height = img.size
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        return buf.getvalue(), width, height
+class CleanDocumentPDF(FPDF):
+    def footer(self):
+        # Position 15 mm from bottom
+        self.set_y(-15)
+        if "Roboto" in self.fonts:
+            self.set_font("Roboto", "", 9)
+        else:
+            self.set_font("Helvetica", "I", 8)
+        self.set_text_color(150, 150, 150)
+        self.cell(0, 10, f"Trang {self.page_no()} / {{nb}}", align="C")
 
 
 def build_pdf(
@@ -28,52 +27,109 @@ def build_pdf(
     ocr_texts: List[Optional[str]],
 ) -> bytes:
     """
-    Builds a multi-page searchable PDF.
+    Builds a clean, freshly digitized PDF document from OCR text.
 
-    Each page contains:
-    - The original image rendered at full A4 width
-    - An invisible text layer with the OCR-extracted text (for searchability)
+    - Pure white A4 background (no camera photos, shadows, or artifacts).
+    - TrueType Unicode typography (Roboto) supporting Vietnamese & English.
+    - Professional document margins, paragraph spacing, and centered headings.
+    - Automatic page numbering.
 
-    Returns the PDF as raw bytes.
+    Returns the generated PDF as raw bytes.
     """
-    pdf = FPDF(orientation="P", unit="mm", format="A4")
-    pdf.set_auto_page_break(auto=False)
+    pdf = CleanDocumentPDF(orientation="P", unit="mm", format="A4")
+    pdf.set_margins(left=20, top=20, right=20)
+    pdf.set_auto_page_break(auto=True, margin=20)
 
-    for image_bytes, text in zip(image_bytes_list, ocr_texts):
-        png_bytes, img_w, img_h = _image_bytes_to_temp_png(image_bytes)
+    # Register Unicode TTF fonts for Vietnamese + English
+    has_roboto = False
+    if os.path.exists(REGULAR_FONT):
+        try:
+            pdf.add_font("Roboto", "", REGULAR_FONT)
+            if os.path.exists(BOLD_FONT):
+                pdf.add_font("Roboto", "B", BOLD_FONT)
+            has_roboto = True
+            print("[PDF] Loaded Roboto TrueType fonts successfully.")
+        except Exception as e:
+            print(f"[PDF] Failed to load Roboto: {e}")
 
-        # Calculate height to maintain aspect ratio within A4
-        aspect = img_h / img_w
-        rendered_h = min(A4_WIDTH_MM * aspect, A4_HEIGHT_MM)
-
+    for idx, text in enumerate(ocr_texts):
         pdf.add_page()
 
-        # --- Image layer ---
-        pdf.image(
-            io.BytesIO(png_bytes),
-            x=0,
-            y=0,
-            w=A4_WIDTH_MM,
-            h=rendered_h,
-        )
+        if not text or not text.strip():
+            # If no text detected for this page
+            if has_roboto:
+                pdf.set_font("Roboto", "", 10)
+                pdf.set_text_color(160, 160, 160)
+            else:
+                pdf.set_font("Helvetica", "I", 10)
+            pdf.cell(0, 10, "[Không nhận diện được nội dung văn bản]", align="C")
+            continue
 
-        # --- Invisible text layer (searchable) ---
-        if text:
-            try:
-                pdf.set_xy(0, 0)
-                pdf.set_font("Helvetica", size=1)   # Tiny font — visually invisible
-                pdf.set_text_color(255, 255, 255)    # White text on white
-                pdf.set_fill_color(255, 255, 255)
-                # Ensure text is safely encodable for core latin-1 font
-                safe_text = text.encode("latin-1", "replace").decode("latin-1")
-                pdf.multi_cell(
-                    w=A4_WIDTH_MM,
-                    h=2,
-                    text=safe_text,
-                    border=0,
-                    align="L",
-                )
-            except Exception:
-                pass
+        lines = text.split("\n")
+        for line in lines:
+            line_str = line.strip()
+            if not line_str:
+                pdf.ln(3)  # Paragraph gap
+                continue
+
+            # Detect common contract headers, national emblems, titles, and articles
+            upper_line = line_str.upper()
+            is_national_motto = (
+                "CỘNG HÒA" in upper_line
+                or "ĐỘC LẬP" in upper_line
+                or "SOCIALIST REPUBLIC" in upper_line
+                or "INDEPENDENCE" in upper_line
+            )
+            is_contract_title = (
+                "HỢP ĐỒNG" in upper_line
+                or "LABOR CONTRACT" in upper_line
+                or "EMPLOYMENT CONTRACT" in upper_line
+                or "THỎA THUẬN" in upper_line
+                or "BIÊN BẢN" in upper_line
+                or "QUYẾT ĐỊNH" in upper_line
+            )
+            is_article_heading = (
+                line_str.startswith("Điều ")
+                or line_str.startswith("ĐIỀU ")
+                or line_str.startswith("Article ")
+                or line_str.startswith("ARTICLE ")
+                or line_str.startswith("Chương ")
+                or line_str.startswith("CHƯƠNG ")
+            )
+
+            is_header = is_national_motto or is_contract_title or is_article_heading
+
+            if has_roboto:
+                if is_contract_title:
+                    pdf.set_font("Roboto", "B", 14)
+                    pdf.set_text_color(15, 15, 15)
+                    pdf.multi_cell(0, 7, line_str, align="C")
+                    pdf.ln(2)
+                elif is_national_motto:
+                    pdf.set_font("Roboto", "B", 11)
+                    pdf.set_text_color(25, 25, 25)
+                    pdf.multi_cell(0, 6, line_str, align="C")
+                    pdf.ln(1)
+                elif is_article_heading:
+                    pdf.ln(2)
+                    pdf.set_font("Roboto", "B", 11.5)
+                    pdf.set_text_color(20, 20, 20)
+                    pdf.multi_cell(0, 6, line_str, align="L")
+                    pdf.ln(1)
+                elif is_header:
+                    pdf.set_font("Roboto", "B", 11)
+                    pdf.set_text_color(20, 20, 20)
+                    pdf.multi_cell(0, 5.8, line_str, align="L")
+                else:
+                    pdf.set_font("Roboto", "", 10.5)
+                    pdf.set_text_color(35, 35, 35)
+                    # Justify longer paragraph lines, left-align short lines
+                    align = "J" if len(line_str) > 60 else "L"
+                    pdf.multi_cell(0, 5.6, line_str, align=align)
+            else:
+                # Fallback to standard core font if TTF missing
+                pdf.set_font("Helvetica", "B" if is_header else "", 10)
+                safe = line_str.encode("latin-1", "replace").decode("latin-1")
+                pdf.multi_cell(0, 5.5, safe)
 
     return bytes(pdf.output())

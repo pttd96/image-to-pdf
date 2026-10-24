@@ -28,15 +28,18 @@ image-to-pdf/
     └── ADR-001.md    # Architecture Decision Record
 ```
 
-## Architecture
+## Architecture & Documentation
 
-See [ADR-001](docs/ADR-001.md) for full architecture decisions.
+Comprehensive system architecture and research documentation:
+- 🏛️ **[System Architecture & Digitization Wiki](docs/ARCHITECTURE.md)**: In-depth technical breakdown of the system architecture, evaluation of the 4 document digitization approaches tested, comparison matrix, and future computer-vision dewarping roadmap.
+- 📋 **[ADR-001: Initial Core Architecture](docs/ADR-001.md)**: Cloud Vision + FastAPI + `fpdf2` foundational decisions.
+- 📋 **[ADR-002: Evaluation of Digitization Paradigms](docs/ADR-002.md)**: Empirical findings, root cause analysis, and conclusions across all experimental approaches.
 
-**Stack:**
-- **Backend:** Python + FastAPI, hosted on Cloud Run
-- **OCR:** Google Cloud Vision API (`DOCUMENT_TEXT_DETECTION`)
-- **PDF:** `fpdf2` — image layer + invisible text layer
-- **Rate limiting:** `slowapi` + reCAPTCHA v3
+**Core Stack:**
+- **Backend:** Python + FastAPI (Vercel serverless / Cloud Run)
+- **Extraction:** Google Cloud Vision API (`DOCUMENT_TEXT_DETECTION`) + Gemini Flash 2.0 Multimodal
+- **PDF Engine:** `fpdf2` with TrueType Unicode Roboto typography
+- **Security:** GCP Workload Identity Federation (keyless OIDC) + optional reCAPTCHA v3
 
 ## Quick Start
 

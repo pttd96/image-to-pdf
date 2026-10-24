@@ -6,7 +6,7 @@ from typing import Any, Dict, List
 
 from fpdf import FPDF
 from fpdf.enums import TextMode
-from PIL import Image, ImageChops, ImageEnhance, ImageFilter
+from PIL import Image, ImageChops, ImageEnhance, ImageFilter, ImageOps
 
 FONT_DIR = Path(__file__).parent / "fonts"
 REGULAR_FONT = str(FONT_DIR / "Roboto-Regular.ttf")
@@ -14,31 +14,40 @@ REGULAR_FONT = str(FONT_DIR / "Roboto-Regular.ttf")
 
 def whiten_document_image(img: Image.Image, enhance_contrast: float = 1.35) -> Image.Image:
     """
-    Applies per-channel Illumination Division to eliminate camera shadows and paper discoloration.
-    Turns paper backgrounds into crisp flatbed #FFFFFF while preserving original book typography
-    and colored ink (e.g. red company stamps or blue signatures).
+    Eliminates camera shadows, uneven lighting, and yellowed paper to produce a flatbed-quality #FFFFFF background.
+    Uses standard Pillow subtract-invert illumination compensation:
+    1. bg_blur - channel = ink_delta (isolates text from lighting gradients)
+    2. invert(ink_delta) = crisp dark text on pure white paper
+    3. autocontrast & enhancement stretches text to deep black
     """
-    rgb = img.convert("RGB")
-    r, g, b = rgb.split()
+    try:
+        rgb = img.convert("RGB")
+        r, g, b = rgb.split()
 
-    w, h = img.size
-    blur_radius = max(20, int(min(w, h) / 70))
+        w, h = img.size
+        blur_radius = max(20, int(min(w, h) / 60))
 
-    r_bg = r.filter(ImageFilter.GaussianBlur(radius=blur_radius))
-    g_bg = g.filter(ImageFilter.GaussianBlur(radius=blur_radius))
-    b_bg = b.filter(ImageFilter.GaussianBlur(radius=blur_radius))
+        whitened_channels = []
+        for ch in (r, g, b):
+            bg = ch.filter(ImageFilter.GaussianBlur(radius=blur_radius))
+            # Subtract isolates ink from background gradient
+            diff = ImageChops.subtract(bg, ch)
+            # Invert turns background to pure 255 white and text into dark ink
+            inv = ImageChops.invert(diff)
+            # Stretch dynamic range to lock background at #FFFFFF
+            whitened_ch = ImageOps.autocontrast(inv, cutoff=1)
+            whitened_channels.append(whitened_ch)
 
-    r_div = ImageChops.divide(r, r_bg)
-    g_div = ImageChops.divide(g, g_bg)
-    b_div = ImageChops.divide(b, b_bg)
+        whitened_rgb = Image.merge("RGB", tuple(whitened_channels))
 
-    whitened_rgb = Image.merge("RGB", (r_div, g_div, b_div))
+        if enhance_contrast > 1.0:
+            enhancer = ImageEnhance.Contrast(whitened_rgb)
+            whitened_rgb = enhancer.enhance(enhance_contrast)
 
-    if enhance_contrast > 1.0:
-        enhancer = ImageEnhance.Contrast(whitened_rgb)
-        whitened_rgb = enhancer.enhance(enhance_contrast)
-
-    return whitened_rgb
+        return whitened_rgb
+    except Exception as e:
+        print(f"[SandwichPDF] Whitening non-fatal error, falling back to original: {e}")
+        return img.convert("RGB")
 
 
 def build_sandwich_pdf(

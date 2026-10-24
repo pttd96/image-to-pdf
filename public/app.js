@@ -115,8 +115,8 @@ convertBtn.addEventListener("click", async () => {
     files.forEach((f) => formData.append("images", f));
     formData.append("recaptcha_token", token);
 
-    // Selected PDF mode: 'whitened' (default), 'typed', or 'sandwich'
-    const selectedMode = document.querySelector('input[name="pdf-mode"]:checked')?.value || "whitened";
+    // Selected PDF mode: 'white_layout' (default), 'typed', 'whitened', or 'sandwich'
+    const selectedMode = document.querySelector('input[name="pdf-mode"]:checked')?.value || "white_layout";
     formData.append("mode", selectedMode);
 
     const response = await fetch(API_URL, { method: "POST", body: formData });

@@ -24,7 +24,7 @@ try:
         run_ocr_parallel,
     )
     from pdf import build_pdf
-    from sandwich import build_sandwich_pdf
+    from sandwich import build_sandwich_pdf, build_spatial_white_pdf
 except ImportError:
     from api.ocr import (
         extract_document_parallel,
@@ -32,7 +32,7 @@ except ImportError:
         run_ocr_parallel,
     )
     from api.pdf import build_pdf
-    from api.sandwich import build_sandwich_pdf
+    from api.sandwich import build_sandwich_pdf, build_spatial_white_pdf
 
 load_dotenv()
 
@@ -137,7 +137,7 @@ async def verify_recaptcha(token: str) -> bool:
 async def convert(
     request: Request,
     images: List[UploadFile] = File(..., description="Images to convert (max 10)"),
-    mode: str = Form("whitened", description="PDF output mode: 'whitened', 'typed', or 'sandwich'"),
+    mode: str = Form("white_layout", description="PDF output mode: 'white_layout', 'whitened', 'typed', or 'sandwich'"),
     recaptcha_token: Optional[str] = Form(None, description="reCAPTCHA v3 token"),
 ):
     try:
@@ -185,7 +185,16 @@ async def convert(
                 detail="No OCR or extraction credentials configured. Please set GEMINI_API_KEY or GCP credentials.",
             )
 
-        if mode in ("whitened", "sandwich"):
+        if mode == "white_layout":
+            print(f"[CONVERT] Mode 'white_layout': Extracting spatial coordinates for {len(image_bytes_list)} images...")
+            pages_boxes = await extract_sandwich_boxes_parallel(
+                image_bytes_list=image_bytes_list,
+                credentials=credentials,
+                gemini_api_key=gemini_key,
+            )
+            print("[CONVERT] Building Spatial White Layout PDF (pure white digital canvas + exact spatial coordinates)...")
+            pdf_bytes = build_spatial_white_pdf(image_bytes_list, pages_boxes)
+        elif mode in ("whitened", "sandwich"):
             is_whitened = (mode == "whitened")
             print(f"[CONVERT] Mode '{mode}': Extracting word boxes for {len(image_bytes_list)} images...")
             pages_boxes = await extract_sandwich_boxes_parallel(

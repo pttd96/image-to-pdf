@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import io
 import json
 import os
 from typing import Any, List, Optional, Union
@@ -7,6 +8,7 @@ from typing import Any, List, Optional, Union
 import httpx
 from google.cloud import vision
 from google.oauth2.service_account import Credentials
+from PIL import Image
 
 try:
     from models import PageDocument
@@ -308,6 +310,200 @@ def _ocr_single_vision_boxes(client: vision.ImageAnnotatorClient, image_bytes: b
     }
 
 
+LAYOUT_ALIGNMENT_SCHEMA: dict[str, Any] = {
+    "type": "OBJECT",
+    "properties": {
+        "page_margins": {
+            "type": "OBJECT",
+            "properties": {
+                "left": {"type": "INTEGER", "description": "Left margin of body text column (0-1000)"},
+                "right": {"type": "INTEGER", "description": "Right margin of body text column (0-1000)"},
+                "top": {"type": "INTEGER", "description": "Top margin (0-1000)"},
+                "bottom": {"type": "INTEGER", "description": "Bottom margin (0-1000)"},
+            },
+            "required": ["left", "right"],
+        },
+        "lines": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "text": {
+                        "type": "STRING",
+                        "description": "Proofread text with exact Vietnamese diacritics, spelling, punctuation, and casing",
+                    },
+                    "align": {
+                        "type": "STRING",
+                        "enum": ["left", "center", "right", "justify"],
+                        "description": "Typographic alignment: 'center' for titles/mottos, 'right' for dates/signatures, 'left' for headings/lists, 'justify' for body paragraphs",
+                    },
+                    "type": {
+                        "type": "STRING",
+                        "enum": ["title", "heading", "body", "meta", "signature", "list_item", "table_row"],
+                        "description": "Document semantic role",
+                    },
+                    "box_2d": {
+                        "type": "ARRAY",
+                        "items": {"type": "INTEGER"},
+                        "description": "[ymin, xmin, ymax, xmax] normalized 0-1000 with leveled horizontal baseline (cancelling camera tilt)",
+                    },
+                    "font_size_pt": {
+                        "type": "NUMBER",
+                        "description": "Recommended font size in pt (e.g. 15 for titles, 12 for headings, 10 for body, 9 for signatures/meta)",
+                    },
+                    "is_bold": {"type": "BOOLEAN"},
+                    "is_italic": {"type": "BOOLEAN"},
+                    "is_paragraph_start": {
+                        "type": "BOOLEAN",
+                        "description": "True if this line begins a new body paragraph with first-line indent",
+                    },
+                },
+                "required": ["text", "align", "box_2d"],
+            },
+        },
+    },
+    "required": ["lines"],
+}
+
+
+async def _align_and_proofread_layout_with_gemini(
+    client: httpx.AsyncClient,
+    image_bytes: bytes,
+    page_data: Optional[dict],
+    api_key: str,
+) -> dict:
+    """
+    Multimodal Document Layout Engine & Typographer:
+    Uses Gemini Flash with the original image (Layer 1) to:
+    1. Inspect visual ink and proofread OCR typos & Vietnamese diacritics.
+    2. Reconstruct typographic structure:
+       - Centered document titles & chapter headings ('center')
+       - Right-aligned dates, signature blocks, page numbers ('right')
+       - Left-aligned/justified body paragraphs with first-line indents ('left' / 'justify')
+    3. Level text baselines to completely eliminate camera tilt and perspective jitter.
+    """
+    img = Image.open(io.BytesIO(image_bytes))
+    img_w, img_h = img.size
+    mime_type = _detect_mime_type(image_bytes)
+    b64_data = base64.b64encode(image_bytes).decode("utf-8")
+
+    draft_text = page_data.get("full_text", "") if page_data else ""
+
+    prompt = (
+        "You are an expert document typographer, layout reconstructor, and Vietnamese/English copyeditor.\n"
+        "Your mission: Analyze this physical document photo (Layer 1) and reconstruct the physical document layout "
+        "into clean, perfectly aligned typographic lines for a pristine digital white-canvas vector PDF.\n\n"
+        "DOCUMENT SENSE & ALIGNMENT RULES:\n"
+        "1. Centered Alignment ('align': 'center'):\n"
+        "   - National motto (e.g. 'CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM', 'Độc lập - Tự do - Hạnh phúc').\n"
+        "   - Document titles ('QUYẾT ĐỊNH', 'HỢP ĐỒNG', 'BÁO CÁO', 'GIẤY ĐỀ NGHỊ', 'CHƯƠNG I', 'BÀI 1').\n"
+        "   - Centered subtitles, mottos, and main headings.\n"
+        "   - Even if the camera capture is slightly tilted or off-center, recognize that these elements belong in the center.\n\n"
+        "2. Right Alignment ('align': 'right'):\n"
+        "   - Dates and locations (e.g., 'Hà Nội, ngày 24 tháng 10 năm 2026', '..., ngày... tháng... năm...').\n"
+        "   - Signature titles and name blocks ('Người làm đơn', 'Giám đốc', '(Ký và ghi rõ họ tên)').\n"
+        "   - Author attributions, epigraphs, header/footer page numbers.\n\n"
+        "3. Left Alignment & Justification ('align': 'left' or 'justify'):\n"
+        "   - Section headings ('1. Tổng quan', 'Điều 1.', 'Mục tiêu:').\n"
+        "   - Standard body paragraphs (use 'justify' or 'left').\n"
+        "   - Bulleted or numbered list items.\n"
+        "   - Form field labels ('Họ và tên: ...', 'Địa chỉ: ...').\n\n"
+        "4. Paragraph Indentation ('is_paragraph_start': true):\n"
+        "   - Mark the first line of each new prose paragraph with is_paragraph_start: true.\n\n"
+        "5. Camera Tilt & Skew Leveling:\n"
+        "   - Phone photos often have tilted, sloping, or curved text baselines.\n"
+        "   - Provide leveled, horizontal bounding boxes [ymin, xmin, ymax, xmax] (normalized 0-1000) so lines are rendered straight and horizontal.\n"
+        "   - Define clean document page margins: left, right, top, bottom.\n\n"
+        "6. Visual Proofreading & OCR Diacritics Correction:\n"
+        "   - Read the visual ink on the page to fix any OCR mistakes (e.g. 'cl' -> 'd', 'rn' -> 'm', missing diacritics like 'o' -> 'ơ/ở/õ/ộ').\n"
+        "   - Guarantee 100% correct Vietnamese diacritics, spelling, punctuation, and capitalization.\n"
+        "   - Do NOT omit any visible text or words."
+    )
+
+    if draft_text.strip():
+        prompt += f"\n\nRAW OCR RECOGNITION (DRAFT REFERENCE):\n{draft_text[:3500]}"
+
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": prompt},
+                    {"inline_data": {"mime_type": mime_type, "data": b64_data}},
+                ]
+            }
+        ],
+        "generationConfig": {
+            "response_mime_type": "application/json",
+            "response_schema": LAYOUT_ALIGNMENT_SCHEMA,
+            "temperature": 0.1,
+        },
+    }
+
+    for model in GEMINI_MODELS:
+        url = GEMINI_API_URL.format(model=model)
+        try:
+            resp = await client.post(url, params={"key": api_key}, json=payload, timeout=50.0)
+            if resp.status_code == 200:
+                data = resp.json()
+                text_content = data["candidates"][0]["content"]["parts"][0]["text"]
+                parsed = json.loads(text_content)
+                lines = parsed.get("lines", [])
+                page_margins = parsed.get("page_margins", {"left": 80, "right": 920, "top": 60, "bottom": 940})
+
+                # Synthesize words for invisible text mode (Sandwich PDF)
+                synthetic_words = []
+                for line in lines:
+                    box = line.get("box_2d", [0, 0, 0, 0])
+                    if len(box) != 4:
+                        continue
+                    ymin, xmin, ymax, xmax = box
+                    line_text = line.get("text", "").strip()
+                    if not line_text:
+                        continue
+
+                    line_w_px = max(1.0, ((xmax - xmin) / 1000.0) * img_w)
+                    line_h_px = max(1.0, ((ymax - ymin) / 1000.0) * img_h)
+                    start_x_px = (xmin / 1000.0) * img_w
+                    start_y_px = (ymin / 1000.0) * img_h
+
+                    tokens = line_text.split()
+                    total_chars = max(1, sum(len(t) for t in tokens))
+                    curr_x_px = start_x_px
+                    space_w = (line_w_px * 0.12) / max(1, len(tokens) - 1) if len(tokens) > 1 else 0
+                    avail_w = max(1.0, line_w_px - (space_w * (len(tokens) - 1)))
+
+                    for t in tokens:
+                        t_w = max(4.0, (len(t) / total_chars) * avail_w)
+                        synthetic_words.append({
+                            "text": t,
+                            "x": curr_x_px,
+                            "y": start_y_px,
+                            "w": t_w,
+                            "h": line_h_px,
+                        })
+                        curr_x_px += t_w + space_w
+
+                words = page_data.get("words", []) if (page_data and page_data.get("words")) else synthetic_words
+
+                print(f"[OCR] Gemini layout engine aligned {len(lines)} lines with document typography.")
+                return {
+                    "lines": lines,
+                    "page_margins": page_margins,
+                    "words": words,
+                    "width": img_w,
+                    "height": img_h,
+                    "full_text": "\n".join(l.get("text", "") for l in lines),
+                }
+        except Exception as e:
+            print(f"[OCR] Gemini layout alignment error with {model}: {e}")
+            continue
+
+    # Fallback to page_data if Gemini fails
+    if page_data:
+        return page_data
+    return {"words": [], "lines": [], "width": img_w, "height": img_h, "full_text": ""}
+
+
 GEMINI_BOX_SCHEMA = {
     "type": "OBJECT",
     "properties": {
@@ -336,10 +532,7 @@ async def _extract_boxes_with_gemini(
     image_bytes: bytes,
     api_key: str,
 ) -> dict:
-    """Extracts bounding boxes from Gemini Flash when Cloud Vision is not configured."""
-    from PIL import Image
-    import io
-
+    """Fallback: Extracts bounding boxes from Gemini Flash when layout alignment is not requested."""
     img = Image.open(io.BytesIO(image_bytes))
     img_w, img_h = img.size
     mime_type = _detect_mime_type(image_bytes)
@@ -469,9 +662,14 @@ async def extract_sandwich_boxes_parallel(
     gemini_api_key: Optional[str] = None,
 ) -> List[dict]:
     """
-    Extracts word bounding boxes for Dual-Layer Sandwich PDF generation.
-    Prefers Cloud Vision OCR for pixel-exact word coordinates; falls back to Gemini Flash.
-    Applies Gemini Flash NLP proofreading to correct OCR misreads when available.
+    Extracts document layout, leveled lines, and word coordinates for:
+    1. Spatial Pure White Layout PDF (uses Gemini-aligned lines + document typography sense).
+    2. Dual-Layer Sandwich PDF (uses word boxes for invisible text overlay).
+
+    When Gemini is available, uses multimodal visual understanding to:
+    - Proofread text against original image ink.
+    - Align document structure: centered titles, right-aligned dates/signatures, indented paragraphs.
+    - Level baselines to cancel camera tilt and perspective jitter.
     """
     api_key = gemini_api_key or os.getenv("GEMINI_API_KEY", "").strip()
 
@@ -483,28 +681,29 @@ async def extract_sandwich_boxes_parallel(
             loop.run_in_executor(None, _ocr_single_vision_boxes, vision_client, img_bytes)
             for img_bytes in image_bytes_list
         ]
-        results = await asyncio.gather(*tasks)
+        vision_results = await asyncio.gather(*tasks)
 
-        # Apply LLM NLP proofreading layer if Gemini key is available
+        # Apply LLM Layout Aligner & Proofreader with Layer 1 visual context
         if api_key:
-            print("[OCR] Running Gemini Flash NLP proofreader to correct OCR typos...")
+            print("[OCR] Running Gemini Flash layout aligner & proofreader with Layer 1 visual context...")
             async with httpx.AsyncClient() as client:
-                proofread_tasks = [
-                    _proofread_words_with_gemini(client, page, api_key)
-                    for page in results
+                align_tasks = [
+                    _align_and_proofread_layout_with_gemini(client, img_bytes, page, api_key)
+                    for img_bytes, page in zip(image_bytes_list, vision_results)
                 ]
-                results = await asyncio.gather(*proofread_tasks)
+                enhanced_results = await asyncio.gather(*align_tasks)
+                return list(enhanced_results)
 
-        return list(results)
+        return list(vision_results)
 
     if api_key:
-        print(f"[OCR] Extracting word coordinates via Gemini Flash ({len(image_bytes_list)} images)...")
+        print(f"[OCR] Extracting document layout & words via Gemini Flash ({len(image_bytes_list)} images)...")
         async with httpx.AsyncClient() as client:
             tasks = [
-                _extract_boxes_with_gemini(client, img_bytes, api_key)
+                _align_and_proofread_layout_with_gemini(client, img_bytes, None, api_key)
                 for img_bytes in image_bytes_list
             ]
             results = await asyncio.gather(*tasks)
             return list(results)
 
-    raise RuntimeError("Neither GCP credentials nor GEMINI_API_KEY is configured for Sandwich PDF.")
+    raise RuntimeError("Neither GCP credentials nor GEMINI_API_KEY is configured for document layout extraction.")

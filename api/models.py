@@ -44,6 +44,32 @@ class KeyValueBlock(BaseModel):
     value: str = ""
 
 
+class AlignedLine(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    text: str = ""
+    align: Literal["left", "center", "right", "justify"] = "left"
+    type: Literal["title", "heading", "body", "meta", "signature", "list_item", "table_row"] = "body"
+    box_2d: List[int] = Field(default_factory=lambda: [0, 0, 0, 0])
+    font_size_pt: Optional[float] = None
+    is_bold: bool = False
+    is_italic: bool = False
+    is_paragraph_start: bool = False
+
+
+class PageMargins(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    left: int = 80
+    right: int = 920
+    top: int = 60
+    bottom: int = 940
+
+
+class AlignedPageLayout(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    page_margins: Optional[PageMargins] = None
+    lines: List[AlignedLine] = Field(default_factory=list)
+
+
 DocumentBlock = Union[
     HeadingBlock,
     ParagraphBlock,

@@ -6,15 +6,45 @@ from typing import Any, Dict, List
 
 from fpdf import FPDF
 from fpdf.enums import TextMode
-from PIL import Image
+from PIL import Image, ImageChops, ImageEnhance, ImageFilter
 
 FONT_DIR = Path(__file__).parent / "fonts"
 REGULAR_FONT = str(FONT_DIR / "Roboto-Regular.ttf")
 
 
+def whiten_document_image(img: Image.Image, enhance_contrast: float = 1.35) -> Image.Image:
+    """
+    Applies per-channel Illumination Division to eliminate camera shadows and paper discoloration.
+    Turns paper backgrounds into crisp flatbed #FFFFFF while preserving original book typography
+    and colored ink (e.g. red company stamps or blue signatures).
+    """
+    rgb = img.convert("RGB")
+    r, g, b = rgb.split()
+
+    w, h = img.size
+    blur_radius = max(20, int(min(w, h) / 70))
+
+    r_bg = r.filter(ImageFilter.GaussianBlur(radius=blur_radius))
+    g_bg = g.filter(ImageFilter.GaussianBlur(radius=blur_radius))
+    b_bg = b.filter(ImageFilter.GaussianBlur(radius=blur_radius))
+
+    r_div = ImageChops.divide(r, r_bg)
+    g_div = ImageChops.divide(g, g_bg)
+    b_div = ImageChops.divide(b, b_bg)
+
+    whitened_rgb = Image.merge("RGB", (r_div, g_div, b_div))
+
+    if enhance_contrast > 1.0:
+        enhancer = ImageEnhance.Contrast(whitened_rgb)
+        whitened_rgb = enhancer.enhance(enhance_contrast)
+
+    return whitened_rgb
+
+
 def build_sandwich_pdf(
     image_bytes_list: List[bytes],
     pages_data: List[Dict[str, Any]],
+    whiten_bg: bool = True,
 ) -> bytes:
     """
     Builds a Dual-Layer Sandwich PDF (Adobe Scan / Apple Notes style):
@@ -47,10 +77,11 @@ def build_sandwich_pdf(
         pdf.set_margins(left=0, top=0, right=0)
         pdf.set_auto_page_break(False)
 
-        # Layer 1: Draw high-res photo background
-        ext = ".jpg" if img.format == "JPEG" else ".png"
+        # Layer 1: Process and draw background
+        processed_img = whiten_document_image(img) if whiten_bg else img
+        ext = ".png"
         with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
-            tmp.write(img_bytes)
+            processed_img.save(tmp, format="PNG")
             tmp_path = tmp.name
 
         try:

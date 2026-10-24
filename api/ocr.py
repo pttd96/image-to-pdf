@@ -395,6 +395,74 @@ async def _extract_boxes_with_gemini(
     return {"words": [], "width": img_w, "height": img_h}
 
 
+PROOFREAD_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "corrections": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "wrong": {"type": "STRING"},
+                    "correct": {"type": "STRING"},
+                },
+                "required": ["wrong", "correct"],
+            },
+        }
+    },
+    "required": ["corrections"],
+}
+
+
+async def _proofread_words_with_gemini(
+    client: httpx.AsyncClient,
+    page_data: dict,
+    api_key: str,
+) -> dict:
+    """Uses Gemini Flash to correct OCR misreads, broken tokens, and missing Vietnamese diacritics."""
+    full_text = page_data.get("full_text", "")
+    words = page_data.get("words", [])
+    if not words or not full_text.strip():
+        return page_data
+
+    prompt = (
+        "You are an expert Vietnamese and English copyeditor. Below is raw OCR-recognized text "
+        "from a physical document photo that may contain OCR misreads, broken characters, or missing diacritics.\n"
+        "Analyze the text and return a JSON list of word corrections: {'corrections': [{'wrong': '...', 'correct': '...'}]}.\n"
+        "Rules: ONLY correct obvious OCR scanning errors (e.g., missing Vietnamese diacritics, broken words like 'cl' for 'd'). "
+        "Do NOT paraphrase or rewrite. If a word is already correct, do not change it.\n\n"
+        f"TEXT:\n{full_text[:4000]}"
+    )
+
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "response_mime_type": "application/json",
+            "response_schema": PROOFREAD_SCHEMA,
+            "temperature": 0.1,
+        },
+    }
+
+    try:
+        url = GEMINI_API_URL.format(model="gemini-2.0-flash")
+        resp = await client.post(url, params={"key": api_key}, json=payload, timeout=20.0)
+        if resp.status_code == 200:
+            data = resp.json()
+            content = data["candidates"][0]["content"]["parts"][0]["text"]
+            corrections_list = json.loads(content).get("corrections", [])
+            correction_map = {c["wrong"]: c["correct"] for c in corrections_list if c.get("wrong")}
+            if correction_map:
+                print(f"[OCR] Gemini NLP corrected {len(correction_map)} OCR words.")
+                for w in words:
+                    orig = w.get("text", "")
+                    if orig in correction_map:
+                        w["text"] = correction_map[orig]
+    except Exception as e:
+        print(f"[OCR] Gemini proofreading non-fatal error: {e}")
+
+    return page_data
+
+
 async def extract_sandwich_boxes_parallel(
     image_bytes_list: List[bytes],
     credentials: Optional[Credentials] = None,
@@ -403,7 +471,10 @@ async def extract_sandwich_boxes_parallel(
     """
     Extracts word bounding boxes for Dual-Layer Sandwich PDF generation.
     Prefers Cloud Vision OCR for pixel-exact word coordinates; falls back to Gemini Flash.
+    Applies Gemini Flash NLP proofreading to correct OCR misreads when available.
     """
+    api_key = gemini_api_key or os.getenv("GEMINI_API_KEY", "").strip()
+
     if credentials:
         print(f"[OCR] Extracting word coordinates via Cloud Vision ({len(image_bytes_list)} images)...")
         vision_client = vision.ImageAnnotatorClient(credentials=credentials)
@@ -413,9 +484,19 @@ async def extract_sandwich_boxes_parallel(
             for img_bytes in image_bytes_list
         ]
         results = await asyncio.gather(*tasks)
+
+        # Apply LLM NLP proofreading layer if Gemini key is available
+        if api_key:
+            print("[OCR] Running Gemini Flash NLP proofreader to correct OCR typos...")
+            async with httpx.AsyncClient() as client:
+                proofread_tasks = [
+                    _proofread_words_with_gemini(client, page, api_key)
+                    for page in results
+                ]
+                results = await asyncio.gather(*proofread_tasks)
+
         return list(results)
 
-    api_key = gemini_api_key or os.getenv("GEMINI_API_KEY", "").strip()
     if api_key:
         print(f"[OCR] Extracting word coordinates via Gemini Flash ({len(image_bytes_list)} images)...")
         async with httpx.AsyncClient() as client:

@@ -137,7 +137,7 @@ async def verify_recaptcha(token: str) -> bool:
 async def convert(
     request: Request,
     images: List[UploadFile] = File(..., description="Images to convert (max 10)"),
-    mode: str = Form("typed", description="PDF output mode: 'typed' or 'sandwich'"),
+    mode: str = Form("whitened", description="PDF output mode: 'whitened', 'typed', or 'sandwich'"),
     recaptcha_token: Optional[str] = Form(None, description="reCAPTCHA v3 token"),
 ):
     try:
@@ -185,15 +185,16 @@ async def convert(
                 detail="No OCR or extraction credentials configured. Please set GEMINI_API_KEY or GCP credentials.",
             )
 
-        if mode == "sandwich":
-            print(f"[CONVERT] Mode 'sandwich': Extracting word boxes for {len(image_bytes_list)} images...")
+        if mode in ("whitened", "sandwich"):
+            is_whitened = (mode == "whitened")
+            print(f"[CONVERT] Mode '{mode}': Extracting word boxes for {len(image_bytes_list)} images...")
             pages_boxes = await extract_sandwich_boxes_parallel(
                 image_bytes_list=image_bytes_list,
                 credentials=credentials,
                 gemini_api_key=gemini_key,
             )
-            print("[CONVERT] Building Dual-Layer Sandwich PDF (photo + invisible text layer)...")
-            pdf_bytes = build_sandwich_pdf(image_bytes_list, pages_boxes)
+            print(f"[CONVERT] Building Dual-Layer PDF (whiten_bg={is_whitened} + invisible text layer)...")
+            pdf_bytes = build_sandwich_pdf(image_bytes_list, pages_boxes, whiten_bg=is_whitened)
         else:
             print(f"[CONVERT] Mode 'typed': Extracting structured document for {len(image_bytes_list)} images...")
             extraction_results = await extract_document_parallel(

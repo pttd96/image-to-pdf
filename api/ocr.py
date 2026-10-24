@@ -248,3 +248,172 @@ async def run_ocr_parallel(
     ]
     results = await asyncio.gather(*tasks)
     return list(results)
+
+
+def _ocr_single_vision_boxes(client: vision.ImageAnnotatorClient, image_bytes: bytes) -> dict:
+    """Extracts exact word bounding boxes and page dimensions from Cloud Vision OCR."""
+    image = vision.Image(content=image_bytes)
+    response = client.document_text_detection(image=image)
+    if response.error.message:
+        raise RuntimeError(f"Vision API error: {response.error.message}")
+
+    annotation = response.full_text_annotation
+    if not annotation:
+        return {"words": [], "width": 0, "height": 0, "full_text": ""}
+
+    words_data = []
+    page_w = 0
+    page_h = 0
+
+    if annotation.pages:
+        p = annotation.pages[0]
+        page_w = p.width
+        page_h = p.height
+        for block in p.blocks:
+            for para in block.paragraphs:
+                for word in para.words:
+                    word_str = "".join(s.text for s in word.symbols).strip()
+                    if not word_str:
+                        continue
+                    verts = word.bounding_box.vertices
+                    xs = [v.x for v in verts if hasattr(v, "x")]
+                    ys = [v.y for v in verts if hasattr(v, "y")]
+                    if not xs or not ys:
+                        continue
+                    min_x, max_x = min(xs), max(xs)
+                    min_y, max_y = min(ys), max(ys)
+                    words_data.append({
+                        "text": word_str,
+                        "x": min_x,
+                        "y": min_y,
+                        "w": max(1, max_x - min_x),
+                        "h": max(1, max_y - min_y),
+                    })
+
+    return {
+        "words": words_data,
+        "width": page_w,
+        "height": page_h,
+        "full_text": annotation.text,
+    }
+
+
+GEMINI_BOX_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "words": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "text": {"type": "STRING"},
+                    "box_2d": {
+                        "type": "ARRAY",
+                        "items": {"type": "INTEGER"},
+                        "description": "[ymin, xmin, ymax, xmax] normalized to 1000",
+                    },
+                },
+                "required": ["text", "box_2d"],
+            },
+        }
+    },
+    "required": ["words"],
+}
+
+
+async def _extract_boxes_with_gemini(
+    client: httpx.AsyncClient,
+    image_bytes: bytes,
+    api_key: str,
+) -> dict:
+    """Extracts bounding boxes from Gemini Flash when Cloud Vision is not configured."""
+    from PIL import Image
+    import io
+
+    img = Image.open(io.BytesIO(image_bytes))
+    img_w, img_h = img.size
+    mime_type = _detect_mime_type(image_bytes)
+    b64_data = base64.b64encode(image_bytes).decode("utf-8")
+
+    prompt = (
+        "Detect all visible words or text tokens on this page with their bounding box. "
+        "Return strictly JSON with 'words': [{'text': '...', 'box_2d': [ymin, xmin, ymax, xmax]}]. "
+        "Coordinates must be normalized from 0 to 1000."
+    )
+
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": prompt},
+                    {"inline_data": {"mime_type": mime_type, "data": b64_data}},
+                ]
+            }
+        ],
+        "generationConfig": {
+            "response_mime_type": "application/json",
+            "response_schema": GEMINI_BOX_SCHEMA,
+            "temperature": 0.1,
+        },
+    }
+
+    for model in GEMINI_MODELS:
+        url = GEMINI_API_URL.format(model=model)
+        try:
+            resp = await client.post(url, params={"key": api_key}, json=payload, timeout=45.0)
+            if resp.status_code == 200:
+                data = resp.json()
+                text_content = data["candidates"][0]["content"]["parts"][0]["text"]
+                parsed = json.loads(text_content)
+                words_list = []
+                for item in parsed.get("words", []):
+                    box = item.get("box_2d", [0, 0, 0, 0])
+                    if len(box) == 4:
+                        ymin, xmin, ymax, xmax = box
+                        words_list.append({
+                            "text": item.get("text", ""),
+                            "x": (xmin / 1000.0) * img_w,
+                            "y": (ymin / 1000.0) * img_h,
+                            "w": ((xmax - xmin) / 1000.0) * img_w,
+                            "h": ((ymax - ymin) / 1000.0) * img_h,
+                        })
+                return {"words": words_list, "width": img_w, "height": img_h}
+        except Exception as e:
+            print(f"[OCR] Gemini box extraction error: {e}")
+            continue
+
+    return {"words": [], "width": img_w, "height": img_h}
+
+
+async def extract_sandwich_boxes_parallel(
+    image_bytes_list: List[bytes],
+    credentials: Optional[Credentials] = None,
+    gemini_api_key: Optional[str] = None,
+) -> List[dict]:
+    """
+    Extracts word bounding boxes for Dual-Layer Sandwich PDF generation.
+    Prefers Cloud Vision OCR for pixel-exact word coordinates; falls back to Gemini Flash.
+    """
+    if credentials:
+        print(f"[OCR] Extracting word coordinates via Cloud Vision ({len(image_bytes_list)} images)...")
+        vision_client = vision.ImageAnnotatorClient(credentials=credentials)
+        loop = asyncio.get_event_loop()
+        tasks = [
+            loop.run_in_executor(None, _ocr_single_vision_boxes, vision_client, img_bytes)
+            for img_bytes in image_bytes_list
+        ]
+        results = await asyncio.gather(*tasks)
+        return list(results)
+
+    api_key = gemini_api_key or os.getenv("GEMINI_API_KEY", "").strip()
+    if api_key:
+        print(f"[OCR] Extracting word coordinates via Gemini Flash ({len(image_bytes_list)} images)...")
+        async with httpx.AsyncClient() as client:
+            tasks = [
+                _extract_boxes_with_gemini(client, img_bytes, api_key)
+                for img_bytes in image_bytes_list
+            ]
+            results = await asyncio.gather(*tasks)
+            return list(results)
+
+    raise RuntimeError("Neither GCP credentials nor GEMINI_API_KEY is configured for Sandwich PDF.")

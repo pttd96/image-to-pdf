@@ -18,11 +18,21 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 try:
-    from ocr import extract_document_parallel, run_ocr_parallel
+    from ocr import (
+        extract_document_parallel,
+        extract_sandwich_boxes_parallel,
+        run_ocr_parallel,
+    )
     from pdf import build_pdf
+    from sandwich import build_sandwich_pdf
 except ImportError:
-    from api.ocr import extract_document_parallel, run_ocr_parallel
+    from api.ocr import (
+        extract_document_parallel,
+        extract_sandwich_boxes_parallel,
+        run_ocr_parallel,
+    )
     from api.pdf import build_pdf
+    from api.sandwich import build_sandwich_pdf
 
 load_dotenv()
 
@@ -127,6 +137,7 @@ async def verify_recaptcha(token: str) -> bool:
 async def convert(
     request: Request,
     images: List[UploadFile] = File(..., description="Images to convert (max 10)"),
+    mode: str = Form("sandwich", description="PDF output mode: 'sandwich' or 'typed'"),
     recaptcha_token: Optional[str] = Form(None, description="reCAPTCHA v3 token"),
 ):
     try:
@@ -174,17 +185,25 @@ async def convert(
                 detail="No OCR or extraction credentials configured. Please set GEMINI_API_KEY or GCP credentials.",
             )
 
-        print("[CONVERT] Running document extraction (Gemini Flash / Cloud Vision)...")
-        extraction_results = await extract_document_parallel(
-            image_bytes_list=image_bytes_list,
-            credentials=credentials,
-            gemini_api_key=gemini_key,
-        )
-        print(f"[CONVERT] Extraction finished. Results count: {len(extraction_results)}")
+        if mode == "sandwich":
+            print(f"[CONVERT] Mode 'sandwich': Extracting word boxes for {len(image_bytes_list)} images...")
+            pages_boxes = await extract_sandwich_boxes_parallel(
+                image_bytes_list=image_bytes_list,
+                credentials=credentials,
+                gemini_api_key=gemini_key,
+            )
+            print("[CONVERT] Building Dual-Layer Sandwich PDF (photo + invisible text layer)...")
+            pdf_bytes = build_sandwich_pdf(image_bytes_list, pages_boxes)
+        else:
+            print(f"[CONVERT] Mode 'typed': Extracting structured document for {len(image_bytes_list)} images...")
+            extraction_results = await extract_document_parallel(
+                image_bytes_list=image_bytes_list,
+                credentials=credentials,
+                gemini_api_key=gemini_key,
+            )
+            print("[CONVERT] Building Digital Typed PDF...")
+            pdf_bytes = build_pdf(image_bytes_list, extraction_results)
 
-        # --- Build multi-page PDF ---
-        print("[CONVERT] Building PDF with fpdf2...")
-        pdf_bytes = build_pdf(image_bytes_list, extraction_results)
         print(f"[CONVERT] PDF built successfully ({len(pdf_bytes)} bytes)")
 
         return Response(

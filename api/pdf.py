@@ -6,13 +6,23 @@ from typing import Any, List, Optional, Tuple, Union
 from fpdf import FPDF
 
 try:
-    from models import HeadingBlock, KeyValueBlock, PageDocument, ParagraphBlock, TableBlock
+    from models import (
+        HeadingBlock,
+        KeyValueBlock,
+        ListBlock,
+        PageDocument,
+        ParagraphBlock,
+        QuoteBlock,
+        TableBlock,
+    )
 except ImportError:
     from api.models import (  # type: ignore
         HeadingBlock,
         KeyValueBlock,
+        ListBlock,
         PageDocument,
         ParagraphBlock,
+        QuoteBlock,
         TableBlock,
     )
 
@@ -41,19 +51,22 @@ def _render_text_cell(
     align: str = "L",
     line_height: float = 5.5,
     has_roboto: bool = True,
+    markdown: bool = False,
+    custom_width: Optional[float] = None,
+    left_margin_override: Optional[float] = None,
 ):
     """
-    Renders text safely without running out of horizontal space.
-    - Always resets X to left margin.
-    - Uses exact effective page width (pdf.epw).
-    - Enables character-level wrapping (wrapmode="CHAR") for long tokens.
-    - Auto-scales font down if text is unusually dense or wide.
+    Renders text safely with Markdown support and intelligent auto-scaling.
+    - Preserves inline bold/italics when markdown=True.
+    - Supports custom indentation and column widths.
+    - Gracefully scales down font or falls back to plain text if syntax issues occur.
     """
     if not text:
         return
 
-    pdf.set_x(pdf.l_margin)
-    width = pdf.epw
+    start_x = left_margin_override if left_margin_override is not None else pdf.l_margin
+    pdf.set_x(start_x)
+    width = custom_width if custom_width is not None else (pdf.w - pdf.r_margin - start_x)
 
     if has_roboto:
         font_family = "Roboto"
@@ -65,7 +78,7 @@ def _render_text_cell(
 
     for size_attempt in [font_size, max(7.0, font_size - 2), 6.0]:
         pdf.set_font(font_family, style, size_attempt)
-        pdf.set_x(pdf.l_margin)
+        pdf.set_x(start_x)
         try:
             pdf.multi_cell(
                 w=width,
@@ -73,26 +86,39 @@ def _render_text_cell(
                 text=text,
                 align=align,
                 wrapmode="CHAR",
-                new_x="LMARGIN",
-                new_y="NEXT",
+                markdown=markdown,
             )
             return
         except Exception:
-            pdf.set_x(pdf.l_margin)
-            continue
+            try:
+                # If markdown parsing fails due to unmatched syntax, try plain text
+                pdf.set_x(start_x)
+                pdf.multi_cell(
+                    w=width,
+                    h=line_height,
+                    text=text,
+                    align=align,
+                    wrapmode="CHAR",
+                    markdown=False,
+                )
+                return
+            except Exception:
+                pdf.set_x(start_x)
+                continue
 
     try:
         pdf.set_font(font_family, style, 6.0)
-        pdf.set_x(pdf.l_margin)
+        pdf.set_x(start_x)
         pdf.multi_cell(
             w=width,
             h=line_height,
             text=text[:150],
             align="L",
             wrapmode="CHAR",
-            new_x="LMARGIN",
-            new_y="NEXT",
+            markdown=False,
         )
+    except Exception as e:
+        print(f"[PDF] Could not render line: {e}")
     except Exception as e:
         print(f"[PDF] Could not render line: {e}")
 
@@ -260,7 +286,7 @@ def _render_key_value_block(pdf: CleanDocumentPDF, block: KeyValueBlock, has_rob
 
 
 def _render_heading_block(pdf: CleanDocumentPDF, block: HeadingBlock, has_roboto: bool):
-    """Renders a document heading or section title."""
+    """Renders a document heading with clean typography hierarchy."""
     text = block.text.strip()
     if not text:
         return
@@ -269,33 +295,46 @@ def _render_heading_block(pdf: CleanDocumentPDF, block: HeadingBlock, has_roboto
     align = align_map.get(block.align.lower(), "L")
 
     if block.level == 1:
-        pdf.ln(1.5)
-        pdf.set_text_color(15, 15, 15)
+        pdf.ln(3.0)
+        pdf.set_text_color(15, 23, 42)
         _render_text_cell(
             pdf=pdf,
             text=text,
-            font_size=13.0,
+            font_size=14.0,
             is_bold=True,
             align=align,
-            line_height=6.5,
+            line_height=7.0,
             has_roboto=has_roboto,
+            markdown=True,
         )
-        pdf.ln(2.0)
+        if align == "C":
+            line_w = min(120.0, pdf.epw * 0.6)
+            start_x = pdf.l_margin + (pdf.epw - line_w) / 2.0
+        else:
+            line_w = min(80.0, pdf.epw * 0.4)
+            start_x = pdf.l_margin
+
+        curr_y = pdf.get_y() + 1.0
+        pdf.set_draw_color(220, 226, 235)
+        pdf.line(start_x, curr_y, start_x + line_w, curr_y)
+        pdf.ln(3.5)
     elif block.level == 2:
-        pdf.ln(1.5)
-        pdf.set_text_color(25, 25, 25)
+        pdf.ln(2.5)
+        pdf.set_text_color(25, 30, 45)
         _render_text_cell(
             pdf=pdf,
             text=text,
-            font_size=11.0,
+            font_size=11.5,
             is_bold=True,
             align=align,
-            line_height=5.8,
+            line_height=6.0,
             has_roboto=has_roboto,
+            markdown=True,
         )
-        pdf.ln(1.0)
+        pdf.ln(1.8)
     else:
-        pdf.set_text_color(30, 30, 30)
+        pdf.ln(1.5)
+        pdf.set_text_color(35, 40, 55)
         _render_text_cell(
             pdf=pdf,
             text=text,
@@ -304,8 +343,9 @@ def _render_heading_block(pdf: CleanDocumentPDF, block: HeadingBlock, has_roboto
             align=align,
             line_height=5.4,
             has_roboto=has_roboto,
+            markdown=True,
         )
-        pdf.ln(0.5)
+        pdf.ln(1.2)
 
 
 def _clean_paragraph_text(text: str) -> str:
@@ -319,7 +359,7 @@ def _clean_paragraph_text(text: str) -> str:
 
 
 def _render_paragraph_block(pdf: CleanDocumentPDF, block: ParagraphBlock, has_roboto: bool):
-    """Renders a standard text paragraph with justified alignment and elegant book spacing."""
+    """Renders a standard text paragraph with justified alignment, rich markdown, and book spacing."""
     text = block.text.strip()
     if not text:
         pdf.ln(2.5)
@@ -338,12 +378,86 @@ def _render_paragraph_block(pdf: CleanDocumentPDF, block: ParagraphBlock, has_ro
             align="J",
             line_height=5.8,
             has_roboto=has_roboto,
+            markdown=True,
         )
-        pdf.ln(3.0)  # Professional paragraph spacing
+        pdf.ln(3.2)
+
+
+def _render_list_block(pdf: CleanDocumentPDF, block: ListBlock, has_roboto: bool):
+    """Renders a bulleted or numbered list with clean indentation and markdown styling."""
+    if not block.items:
+        return
+
+    pdf.set_text_color(30, 30, 30)
+    bullet_indent = 6.0
+    text_width = pdf.epw - bullet_indent
+
+    for i, item in enumerate(block.items):
+        item_str = item.strip()
+        if not item_str:
+            continue
+
+        prefix = f"{i + 1}. " if block.ordered else "• "
+        pdf.set_x(pdf.l_margin)
+
+        font_family = "Roboto" if has_roboto else "Helvetica"
+        pdf.set_font(font_family, "B", 10.0)
+        pdf.cell(w=bullet_indent, h=5.4, text=prefix, align="L")
+
+        _render_text_cell(
+            pdf=pdf,
+            text=item_str,
+            font_size=10.0,
+            is_bold=False,
+            align="L",
+            line_height=5.4,
+            has_roboto=has_roboto,
+            markdown=True,
+            custom_width=text_width,
+            left_margin_override=pdf.l_margin + bullet_indent,
+        )
+        pdf.ln(1.5)
+
+    pdf.ln(2.0)
+
+
+def _render_quote_block(pdf: CleanDocumentPDF, block: QuoteBlock, has_roboto: bool):
+    """Renders an excerpt or blockquote with a stylish vertical accent bar."""
+    text = block.text.strip()
+    if not text:
+        return
+
+    pdf.ln(1.5)
+    bar_width = 1.0
+    bar_padding = 5.0
+    content_width = pdf.epw - (bar_width + bar_padding)
+
+    start_y = pdf.get_y()
+    pdf.set_text_color(70, 75, 85)
+
+    _render_text_cell(
+        pdf=pdf,
+        text=text,
+        font_size=10.0,
+        is_bold=False,
+        align="L",
+        line_height=5.4,
+        has_roboto=has_roboto,
+        markdown=True,
+        custom_width=content_width,
+        left_margin_override=pdf.l_margin + bar_width + bar_padding,
+    )
+
+    end_y = pdf.get_y()
+    bar_height = max(5.4, end_y - start_y)
+
+    pdf.set_fill_color(180, 190, 205)
+    pdf.rect(x=pdf.l_margin, y=start_y, w=bar_width, h=bar_height, style="F")
+    pdf.ln(3.0)
 
 
 def _render_structured_page(pdf: CleanDocumentPDF, page_doc: PageDocument, has_roboto: bool):
-    """Renders a page composed of typed blocks (headings, paragraphs, tables, key-values)."""
+    """Renders a page composed of typed blocks (headings, paragraphs, lists, quotes, tables, key-values)."""
     for block in page_doc.blocks:
         b_type = getattr(block, "type", None) or (block.get("type") if isinstance(block, dict) else None)
 
@@ -355,6 +469,14 @@ def _render_structured_page(pdf: CleanDocumentPDF, page_doc: PageDocument, has_r
             if isinstance(block, dict):
                 block = HeadingBlock.model_validate(block)
             _render_heading_block(pdf, block, has_roboto)
+        elif b_type == "list":
+            if isinstance(block, dict):
+                block = ListBlock.model_validate(block)
+            _render_list_block(pdf, block, has_roboto)
+        elif b_type == "quote":
+            if isinstance(block, dict):
+                block = QuoteBlock.model_validate(block)
+            _render_quote_block(pdf, block, has_roboto)
         elif b_type == "key_value":
             if isinstance(block, dict):
                 block = KeyValueBlock.model_validate(block)
@@ -364,10 +486,9 @@ def _render_structured_page(pdf: CleanDocumentPDF, page_doc: PageDocument, has_r
                 block = ParagraphBlock.model_validate(block)
             _render_paragraph_block(pdf, block, has_roboto)
         else:
-            # Fallback for unrecognized block
             val = getattr(block, "text", "") or str(block)
             if val.strip():
-                _render_text_cell(pdf, val, has_roboto=has_roboto)
+                _render_text_cell(pdf, val, has_roboto=has_roboto, markdown=True)
 
 
 def _render_legacy_text_page(pdf: CleanDocumentPDF, text: str, has_roboto: bool):
@@ -503,6 +624,8 @@ def build_pdf(
             pdf.add_font("Roboto", "", REGULAR_FONT)
             if os.path.exists(BOLD_FONT):
                 pdf.add_font("Roboto", "B", BOLD_FONT)
+                pdf.add_font("Roboto", "I", REGULAR_FONT)
+                pdf.add_font("Roboto", "BI", BOLD_FONT)
             has_roboto = True
         except Exception as e:
             print(f"[PDF] Failed to load Roboto: {e}")

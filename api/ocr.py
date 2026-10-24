@@ -27,11 +27,16 @@ GEMINI_JSON_SCHEMA: dict[str, Any] = {
                 "properties": {
                     "type": {
                         "type": "STRING",
-                        "enum": ["heading", "paragraph", "table", "key_value"],
+                        "enum": ["heading", "paragraph", "list", "quote", "table", "key_value"],
                     },
                     "text": {"type": "STRING"},
                     "level": {"type": "INTEGER"},
                     "align": {"type": "STRING", "enum": ["left", "center", "right"]},
+                    "ordered": {"type": "BOOLEAN"},
+                    "items": {
+                        "type": "ARRAY",
+                        "items": {"type": "STRING"},
+                    },
                     "title": {"type": "STRING"},
                     "headers": {
                         "type": "ARRAY",
@@ -55,19 +60,24 @@ GEMINI_JSON_SCHEMA: dict[str, Any] = {
 }
 
 SYSTEM_INSTRUCTION = (
-    "You are an expert document and book digitizer. Analyze this physical document/book image "
-    "(Vietnamese & English). Extract the content in exact vertical reading order into structured blocks.\n"
-    "- If a table or grid is present, extract it as a 'table' block with all header columns and row values. "
-    "Do not miss table cells or borders.\n"
-    "- For document titles, book chapter headings, mottos (e.g. 'CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM', 'HỢP ĐỒNG LAO ĐỘNG', 'Chương 1: ...'), "
-    "or section/article headings (e.g. 'Điều 1: ...', '1.1 Khái niệm'), extract as 'heading' with appropriate "
-    "level (1 for main chapter/document titles, 2 for sections/articles, 3 for subsections) and align ('center' for mottos/titles, 'left' for sections).\n"
-    "- For labeled form items (e.g. 'Họ và tên: Nguyễn Văn A', 'Địa chỉ: ...'), extract as 'key_value'.\n"
-    "- For all standard text, book body paragraphs, contract clauses, and descriptions, extract as 'paragraph'. "
-    "IMPORTANT: In printed books and documents, physical lines are wrapped to the page width. You MUST merge wrapped lines "
-    "within the same sentence or paragraph into a continuous flowing block of text. Do NOT leave artificial line breaks in the "
-    "middle of sentences. Only split into separate paragraph blocks when there is a genuine paragraph break in the source text.\n"
-    "Preserve exact Vietnamese diacritics, numbers, and spelling. Output strictly valid JSON conforming to the schema."
+    "You are an expert document and book digitizer and professional typographer. Analyze this physical "
+    "document or book image (Vietnamese & English). Extract the content in exact vertical reading order into "
+    "clean, structured typographic blocks.\n"
+    "- Typography & Inline Styling: Faithfully preserve inline formatting! Use **bold** for bold words/phrases, "
+    "*italics* for book titles, Latin terms, quotes, or emphasized words. Do not strip inline formatting.\n"
+    "- Document & Chapter Titles: Extract as 'heading' with level 1 (e.g. 'CHƯƠNG 1', book/article titles). Use level 2 for "
+    "sections ('1.1 Khái niệm', 'Điều 1') and level 3 for subsections. Set align='center' for mottos/chapter titles, 'left' for sections.\n"
+    "- Lists: Extract bulleted lists or numbered lists as 'list' blocks with 'items' (each item preserving inline **bold** or *italics*), "
+    "and 'ordered'=true for numbered lists or false for bullet lists.\n"
+    "- Inset Quotes / Callouts: Extract indented blockquotes or highlighted excerpt callouts as 'quote' blocks.\n"
+    "- Tables: Extract tables into 'table' blocks with all header columns and row values. Do not miss table cells.\n"
+    "- Labeled Form Fields: For key-value items (e.g. 'Họ và tên: ...', 'Địa chỉ: ...'), extract as 'key_value'.\n"
+    "- Body Paragraphs: For all standard text, extract as 'paragraph'.\n"
+    "CRITICAL FOR PROSE: In physical books, printed lines end arbitrarily at the page column margin. You MUST merge "
+    "broken lines within the same sentence/paragraph into a single continuous, flowing block of text with proper spaces. "
+    "Never keep accidental line breaks in the middle of sentences. Only create a new paragraph block where there is an "
+    "actual paragraph break in the source text.\n"
+    "Preserve exact Vietnamese diacritics, numbers, and spelling. Output strictly valid JSON matching the schema."
 )
 
 

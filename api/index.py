@@ -137,7 +137,7 @@ async def verify_recaptcha(token: str) -> bool:
 async def convert(
     request: Request,
     images: List[UploadFile] = File(..., description="Images to convert (max 10)"),
-    mode: str = Form("sandwich", description="PDF output mode: 'sandwich' or 'typed'"),
+    mode: str = Form("typed", description="PDF output mode: 'typed' or 'sandwich'"),
     recaptcha_token: Optional[str] = Form(None, description="reCAPTCHA v3 token"),
 ):
     try:

@@ -6,13 +6,26 @@ class HeadingBlock(BaseModel):
     model_config = ConfigDict(extra="ignore")
     type: Literal["heading"] = "heading"
     text: str = ""
-    level: int = 1  # 1 for document title, 2 for section/article, 3 for sub-item
+    level: int = 1  # 1 for chapter/document title, 2 for section, 3 for subsection
     align: Literal["left", "center", "right"] = "left"
 
 
 class ParagraphBlock(BaseModel):
     model_config = ConfigDict(extra="ignore")
     type: Literal["paragraph"] = "paragraph"
+    text: str = ""  # Supports inline markdown (**bold**, *italics*)
+
+
+class ListBlock(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    type: Literal["list"] = "list"
+    ordered: bool = False
+    items: List[str] = Field(default_factory=list)  # Supports inline markdown
+
+
+class QuoteBlock(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    type: Literal["quote"] = "quote"
     text: str = ""
 
 
@@ -31,7 +44,14 @@ class KeyValueBlock(BaseModel):
     value: str = ""
 
 
-DocumentBlock = Union[HeadingBlock, ParagraphBlock, TableBlock, KeyValueBlock]
+DocumentBlock = Union[
+    HeadingBlock,
+    ParagraphBlock,
+    ListBlock,
+    QuoteBlock,
+    TableBlock,
+    KeyValueBlock,
+]
 
 
 class PageDocument(BaseModel):

@@ -18,10 +18,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 try:
-    from ocr import run_ocr_parallel
+    from ocr import extract_document_parallel, run_ocr_parallel
     from pdf import build_pdf
 except ImportError:
-    from api.ocr import run_ocr_parallel
+    from api.ocr import extract_document_parallel, run_ocr_parallel
     from api.pdf import build_pdf
 
 load_dotenv()
@@ -160,16 +160,31 @@ async def convert(
                 )
             image_bytes_list.append(data)
 
-        # --- Load GCP credentials and run OCR in parallel ---
-        print("[CONVERT] Obtaining GCP credentials...")
-        credentials = get_gcp_credentials(request)
-        print("[CONVERT] Running Google Cloud Vision OCR in parallel...")
-        ocr_results = await run_ocr_parallel(image_bytes_list, credentials)
-        print(f"[CONVERT] OCR finished. Results count: {len(ocr_results)}")
+        # --- Load credentials and run extraction in parallel ---
+        gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
+        credentials = None
+        try:
+            credentials = get_gcp_credentials(request)
+        except Exception as auth_err:
+            print(f"[AUTH] GCP credentials not available: {auth_err}")
+
+        if not gemini_key and not credentials:
+            raise HTTPException(
+                status_code=500,
+                detail="No OCR or extraction credentials configured. Please set GEMINI_API_KEY or GCP credentials.",
+            )
+
+        print("[CONVERT] Running document extraction (Gemini Flash / Cloud Vision)...")
+        extraction_results = await extract_document_parallel(
+            image_bytes_list=image_bytes_list,
+            credentials=credentials,
+            gemini_api_key=gemini_key,
+        )
+        print(f"[CONVERT] Extraction finished. Results count: {len(extraction_results)}")
 
         # --- Build multi-page PDF ---
         print("[CONVERT] Building PDF with fpdf2...")
-        pdf_bytes = build_pdf(image_bytes_list, ocr_results)
+        pdf_bytes = build_pdf(image_bytes_list, extraction_results)
         print(f"[CONVERT] PDF built successfully ({len(pdf_bytes)} bytes)")
 
         return Response(
@@ -191,6 +206,13 @@ async def convert(
 @app.get("/health")
 @app.get("/api/index/health")
 @app.get("/api/index")
-@app.get("/")
 async def health():
     return {"status": "ok"}
+
+
+# Serve static web UI files when running locally
+from fastapi.staticfiles import StaticFiles
+
+public_dir = Path(__file__).parent.parent / "public"
+if public_dir.exists():
+    app.mount("/", StaticFiles(directory=str(public_dir), html=True), name="public")

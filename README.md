@@ -5,8 +5,9 @@ A lightweight web app that converts photos of documents (contracts, forms, lette
 ## Features
 
 - 📷 Upload multiple images (up to 10) — drag & drop supported
-- 🔍 OCR via Google Cloud Vision API (Vietnamese + English)
-- 📑 Merged into a single searchable PDF (image + invisible text layer)
+- 📊 Native table & layout extraction powered by Gemini Flash (detects headers, columns, cells, and key-values)
+- 🔍 OCR fallback via Google Cloud Vision API (Vietnamese + English)
+- 📑 Reconstructed into a clean digitized PDF with Unicode TrueType typography (Roboto)
 - 📥 Instant download — no sign-up required
 - 🛡️ Abuse protection: IP rate limiting + reCAPTCHA v3
 
@@ -47,11 +48,12 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
-# Set your Google Cloud credentials
+# Set credentials (GEMINI_API_KEY for tables + structured layout, or GCP for Vision OCR)
+export GEMINI_API_KEY="your-gemini-api-key"
 export GOOGLE_APPLICATION_CREDENTIALS="path/to/service-account.json"
 export RECAPTCHA_SECRET_KEY="your-recaptcha-secret"
 
-uvicorn main:app --reload
+uvicorn api.index:app --reload
 ```
 
 ### Frontend

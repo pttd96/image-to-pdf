@@ -41,27 +41,30 @@ def test_gemini_api():
     masked_key = api_key[:6] + "..." + api_key[-4:] if len(api_key) > 10 else "***"
     print(f"🔑 Found GEMINI_API_KEY: {masked_key}")
 
-    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
-    payload = {
-        "contents": [{"parts": [{"text": "Reply with only the word 'OK' if you can read this."}]}]
-    }
+    models_to_test = ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-flash-latest"]
+    passed = False
+    for model in models_to_test:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+        payload = {
+            "contents": [{"parts": [{"text": "Reply with only the word 'OK' if you can read this."}]}]
+        }
+        try:
+            t0 = time.time()
+            resp = httpx.post(url, params={"key": api_key}, json=payload, timeout=15.0)
+            elapsed = int((time.time() - t0) * 1000)
 
-    try:
-        t0 = time.time()
-        resp = httpx.post(url, params={"key": api_key}, json=payload, timeout=15.0)
-        elapsed = int((time.time() - t0) * 1000)
+            if resp.status_code == 200:
+                data = resp.json()
+                reply = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                print(f"✅ [PASS] Gemini API ({model}) responded in {elapsed}ms! Response: '{reply}'")
+                passed = True
+                break
+            else:
+                print(f"❌ [{model}] returned HTTP {resp.status_code}: {resp.text[:150]}")
+        except Exception as e:
+            print(f"❌ [{model}] request failed: {e}")
 
-        if resp.status_code == 200:
-            data = resp.json()
-            reply = data["candidates"][0]["content"]["parts"][0]["text"].strip()
-            print(f"✅ [PASS] Gemini API responded in {elapsed}ms! Response: '{reply}'")
-            return True
-        else:
-            print(f"❌ [FAIL] Gemini API returned HTTP {resp.status_code}: {resp.text}")
-            return False
-    except Exception as e:
-        print(f"❌ [FAIL] Gemini API request failed: {e}")
-        return False
+    return passed
 
 
 def test_cloud_vision_api():

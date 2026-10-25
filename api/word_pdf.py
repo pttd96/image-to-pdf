@@ -30,21 +30,34 @@ class WordDocumentPDF(FPDF):
 
 def _is_table_row(line: str) -> bool:
     stripped = line.strip()
-    return stripped.startswith("|") and stripped.endswith("|") and stripped.count("|") >= 2
+    if "|" not in stripped:
+        return False
+    # Check if line contains at least one pipe separating content
+    parts = stripped.split("|")
+    if stripped.startswith("|"):
+        parts = parts[1:]
+    if stripped.endswith("|"):
+        parts = parts[:-1]
+    return len(parts) >= 2
 
 
 def _is_table_separator(line: str) -> bool:
     stripped = line.strip()
-    if not (stripped.startswith("|") and stripped.endswith("|")):
+    if "|" not in stripped:
         return False
-    # Check if inside is dashes and colons
-    inner = stripped[1:-1].replace("|", "").replace("-", "").replace(":", "").replace(" ", "")
-    return len(inner) == 0
+    # Check if the line consists only of dashes, colons, pipes, and whitespace
+    cleaned = re.sub(r"[\s\|\:\-]+", "", stripped)
+    return len(cleaned) == 0
 
 
 def _parse_table_cells(line: str) -> List[str]:
-    parts = line.strip().split("|")[1:-1]
-    return [p.strip() for p in parts]
+    stripped = line.strip()
+    parts = stripped.split("|")
+    if stripped.startswith("|"):
+        parts = parts[1:]
+    if stripped.endswith("|"):
+        parts = parts[:-1]
+    return [p.strip().replace("**", "").replace("__", "") for p in parts]
 
 
 def _compute_col_widths(

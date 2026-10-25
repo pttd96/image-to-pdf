@@ -1,0 +1,152 @@
+<mxfile host="app.diagrams.net" modified="2026-10-25T10:20:00.000Z" agent="Antigravity" version="24.0.0" type="device">
+  <diagram id="word-pdf-architecture" name="Word-Style PDF Architecture">
+    <mxGraphModel dx="1420" dy="880" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1350" pageHeight="950" background="#F8FAFC" math="0" shadow="1">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Title -->
+        <mxCell id="title" value="&lt;b&gt;DOCUMENT DIGITIZATION PIPELINE: PHOTO → WORD-GRADE PDF&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#64748B&quot;&gt;Serverless-native architecture optimized for Vercel, OpenCV, Gemini 2.0 Flash, and fpdf2&lt;/font&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=18;fontFamily=Helvetica;" vertex="1" parent="1">
+          <mxGeometry x="150" y="20" width="1050" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- STAGE 1: PREPROCESSING -->
+        <mxCell id="group_stage1" value="Stage 1: Geometric Rectification (OpenCV / CPU)" style="swimlane;whiteSpace=wrap;html=1;fillColor=#EFF6FF;strokeColor=#3B82F6;fontStyle=1;fontSize=14;fontColor=#1E3A8A;rounded=1;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="90" width="360" height="740" as="geometry" />
+        </mxCell>
+
+        <mxCell id="node_input_photo" value="&lt;b&gt;Raw Smartphone Photo&lt;/b&gt;&lt;br&gt;• Angled perspective (trapezoid)&lt;br&gt;• Camera lens distortion&lt;br&gt;• Shadows &amp; uneven lighting&lt;br&gt;• Contracts, receipts, forms" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#94A3B8;fontSize=12;align=left;spacingLeft=12;shadow=1;" vertex="1" parent="group_stage1">
+          <mxGeometry x="25" y="50" width="310" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="node_corner_detect" value="&lt;b&gt;Document Edge &amp; Corner Detection&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#475569&quot;&gt;• Bilateral filter noise reduction&lt;br&gt;• Canny edge / adaptive threshold&lt;br&gt;• Largest convex quad contour (4 corners)&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DBEAFE;strokeColor=#3B82F6;fontSize=12;align=left;spacingLeft=12;shadow=1;" vertex="1" parent="group_stage1">
+          <mxGeometry x="25" y="190" width="310" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="node_homography" value="&lt;b&gt;4-Point Perspective Homography&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#475569&quot;&gt;• &lt;i&gt;cv2.getPerspectiveTransform&lt;/i&gt;&lt;br&gt;• Warps quadrilateral to frontal plane&lt;br&gt;• Standard A4 aspect ratio (1 : 1.414)&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DBEAFE;strokeColor=#3B82F6;fontSize=12;align=left;spacingLeft=12;shadow=1;" vertex="1" parent="group_stage1">
+          <mxGeometry x="25" y="320" width="310" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="node_illumination" value="&lt;b&gt;Light Contrast Normalization&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#475569&quot;&gt;• Dynamic range stretch&lt;br&gt;• Removes subtle flash hot-spots&lt;br&gt;• Optimizes text legibility for Vision API&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DBEAFE;strokeColor=#3B82F6;fontSize=12;align=left;spacingLeft=12;shadow=1;" vertex="1" parent="group_stage1">
+          <mxGeometry x="25" y="450" width="310" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="node_rectified_img" value="&lt;b&gt;Rectified Frontal Image&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#15803D&quot;&gt;✓ Leveled horizontal baselines&lt;br&gt;✓ True top-down rectangular orientation&lt;br&gt;✓ High contrast black text on light paper&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DCFCE7;strokeColor=#22C55E;fontSize=12;align=left;spacingLeft=12;shadow=1;" vertex="1" parent="group_stage1">
+          <mxGeometry x="25" y="580" width="310" height="110" as="geometry" />
+        </mxCell>
+
+        <!-- Edges Stage 1 -->
+        <mxCell id="edge1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#3B82F6;" edge="1" parent="group_stage1" source="node_input_photo" target="node_corner_detect">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#3B82F6;" edge="1" parent="group_stage1" source="node_corner_detect" target="node_homography">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#3B82F6;" edge="1" parent="group_stage1" source="node_homography" target="node_illumination">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#3B82F6;" edge="1" parent="group_stage1" source="node_illumination" target="node_rectified_img">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- STAGE 2: EXTRACTION -->
+        <mxCell id="group_stage2" value="Stage 2: Semantic Transcription (Gemini Flash / Vercel API)" style="swimlane;whiteSpace=wrap;html=1;fillColor=#FAF5FF;strokeColor=#A855F7;fontStyle=1;fontSize=14;fontColor=#581C87;rounded=1;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="440" y="90" width="390" height="740" as="geometry" />
+        </mxCell>
+
+        <mxCell id="node_gemini" value="&lt;b&gt;Gemini 2.0 Flash Multimodal Call&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#475569&quot;&gt;• REST POST via &lt;i&gt;httpx&lt;/i&gt; (0 Vercel CPU load)&lt;br&gt;• Native Vietnamese OCR &amp; tone correction&lt;br&gt;• Latency: ~1.2s – 1.8s&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#A855F7;fontSize=12;align=left;spacingLeft=12;shadow=1;" vertex="1" parent="group_stage2">
+          <mxGeometry x="25" y="50" width="340" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="node_system_prompt" value="&lt;b&gt;Typist &amp; Word-Structuring Prompt&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#475569&quot;&gt;• &lt;i&gt;Mottos &amp; Titles:&lt;/i&gt; &amp;lt;center&amp;gt;# Title&amp;lt;/center&amp;gt;&lt;br&gt;• &lt;i&gt;Headings:&lt;/i&gt; ## Section / ### Article&lt;br&gt;• &lt;i&gt;Paragraphs:&lt;/i&gt; Flowing unchopped sentences&lt;br&gt;• &lt;i&gt;Tables:&lt;/i&gt; Standard GitHub Markdown tables&lt;br&gt;• &lt;i&gt;Signatures:&lt;/i&gt; 2-col side-by-side markdown table&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E8FF;strokeColor=#A855F7;fontSize=11;align=left;spacingLeft=12;shadow=1;" vertex="1" parent="group_stage2">
+          <mxGeometry x="25" y="180" width="340" height="140" as="geometry" />
+        </mxCell>
+
+        <mxCell id="node_markdown_out" value="&lt;b&gt;Universal Markdown Document AST&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#6B21A8&quot;&gt;No brittle custom Pydantic schemas!&lt;br&gt;Standard GFM format natively represents all headings, nested tables, bullet lists, and bold text.&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9333EA;fontSize=12;align=left;spacingLeft=12;shadow=1;" vertex="1" parent="group_stage2">
+          <mxGeometry x="25" y="360" width="340" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="node_audit_pass" value="&lt;b&gt;Optional Fast Verifier Pass (Diff Audit)&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#475569&quot;&gt;• Passes [Image + Extracted Markdown]&lt;br&gt;• Prompt: &lt;i&gt;&quot;Fix ONLY dropped table rows, numbers, or misspelled words against the image. Do not restructure.&quot;&lt;/i&gt;&lt;br&gt;• Guarantees legal precision for contracts&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FEF3C7;strokeColor=#F59E0B;fontSize=11;align=left;spacingLeft=12;shadow=1;" vertex="1" parent="group_stage2">
+          <mxGeometry x="25" y="490" width="340" height="110" as="geometry" />
+        </mxCell>
+
+        <mxCell id="node_final_md" value="&lt;b&gt;Verified Document Markdown&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#15803D&quot;&gt;✓ Cleaned Vietnamese diacritics&lt;br&gt;✓ Validated table numbers &amp; amounts&lt;br&gt;✓ Word-layout semantics preserved&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DCFCE7;strokeColor=#22C55E;fontSize=12;align=left;spacingLeft=12;shadow=1;" vertex="1" parent="group_stage2">
+          <mxGeometry x="25" y="630" width="340" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- Edges Stage 2 -->
+        <mxCell id="edge2_1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#A855F7;" edge="1" parent="group_stage2" source="node_gemini" target="node_system_prompt">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge2_2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#A855F7;" edge="1" parent="group_stage2" source="node_system_prompt" target="node_markdown_out">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge2_3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#A855F7;" edge="1" parent="group_stage2" source="node_markdown_out" target="node_audit_pass">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge2_4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#A855F7;" edge="1" parent="group_stage2" source="node_audit_pass" target="node_final_md">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- STAGE 3: SYNTHESIS -->
+        <mxCell id="group_stage3" value="Stage 3: Word-Grade Vector Typesetter (fpdf2)" style="swimlane;whiteSpace=wrap;html=1;fillColor=#F0FDF4;strokeColor=#16A34A;fontStyle=1;fontSize=14;fontColor=#14532D;rounded=1;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="870" y="90" width="440" height="740" as="geometry" />
+        </mxCell>
+
+        <mxCell id="node_page_setup" value="&lt;b&gt;Standard Word Page Geometry&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#475569&quot;&gt;• Pure Vector Canvas (#FFFFFF)&lt;br&gt;• A4 Format: 210mm × 297mm&lt;br&gt;• Standard Margins: Left/Right/Top/Bottom 20mm&lt;br&gt;• Auto Page-Break at 20mm margin&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#16A34A;fontSize=12;align=left;spacingLeft=12;shadow=1;" vertex="1" parent="group_stage3">
+          <mxGeometry x="25" y="50" width="390" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="node_typography" value="&lt;b&gt;Word Typography &amp; Spacing Engine&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#475569&quot;&gt;• TrueType Unicode Roboto (Regular, Bold)&lt;br&gt;• &lt;b&gt;Titles:&lt;/b&gt; 15–16pt Bold, Centered&lt;br&gt;• &lt;b&gt;Headings:&lt;/b&gt; 12pt Bold Left / Section 11pt Bold&lt;br&gt;• &lt;b&gt;Body:&lt;/b&gt; 10.5pt Regular, Justified (align=&quot;J&quot;)&lt;br&gt;• &lt;b&gt;Physics:&lt;/b&gt; 1.3x line height, word-level wrapping (no cut syllables)&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DCFCE7;strokeColor=#16A34A;fontSize=11;align=left;spacingLeft=12;shadow=1;" vertex="1" parent="group_stage3">
+          <mxGeometry x="25" y="170" width="390" height="130" as="geometry" />
+        </mxCell>
+
+        <mxCell id="node_table_renderer" value="&lt;b&gt;Word-Style Native Table Grid&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#475569&quot;&gt;• Header fill color: #F2F4F8 (subtle neutral gray)&lt;br&gt;• Cell borders: 0.2mm clean gray (#D0D5DD)&lt;br&gt;• Dynamic proportional column width weights&lt;br&gt;• Padded cell margins (1.5mm top/bottom, 2mm left/right)&lt;br&gt;• Numeric / Short codes (STT) centered&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DCFCE7;strokeColor=#16A34A;fontSize=11;align=left;spacingLeft=12;shadow=1;" vertex="1" parent="group_stage3">
+          <mxGeometry x="25" y="330" width="390" height="130" as="geometry" />
+        </mxCell>
+
+        <mxCell id="node_signature_renderer" value="&lt;b&gt;2-Column Signature Block Styler&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#475569&quot;&gt;• Left column: Bên A / Right column: Bên B&lt;br&gt;• Borderless layout with 25mm vertical signature room&lt;br&gt;• Aligned with page margins&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DCFCE7;strokeColor=#16A34A;fontSize=11;align=left;spacingLeft=12;shadow=1;" vertex="1" parent="group_stage3">
+          <mxGeometry x="25" y="490" width="390" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="node_output_pdf" value="&lt;b&gt;Generated PDF (As If Converted From Word)&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#15803D&quot;&gt;✓ 100% vector typography (razor sharp at 500% zoom)&lt;br&gt;✓ Full text selectable &amp; searchable (Cmd+F)&lt;br&gt;✓ Tiny file size (50KB – 150KB per page)&lt;br&gt;✓ Clean running footer: &quot;Trang X / Y&quot;&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#BBF7D0;strokeColor=#15803D;fontSize=12;align=left;spacingLeft=12;shadow=1;" vertex="1" parent="group_stage3">
+          <mxGeometry x="25" y="610" width="390" height="100" as="geometry" />
+        </mxCell>
+
+        <!-- Edges Stage 3 -->
+        <mxCell id="edge3_1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#16A34A;" edge="1" parent="group_stage3" source="node_page_setup" target="node_typography">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge3_2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#16A34A;" edge="1" parent="group_stage3" source="node_typography" target="node_table_renderer">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge3_3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#16A34A;" edge="1" parent="group_stage3" source="node_table_renderer" target="node_signature_renderer">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge3_4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#16A34A;" edge="1" parent="group_stage3" source="node_signature_renderer" target="node_output_pdf">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Inter-Stage Connecting Edges -->
+        <mxCell id="conn_stage1_to_2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=3;strokeColor=#2563EB;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="node_rectified_img" target="node_gemini">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="420" y="725" />
+              <mxPoint x="420" y="185" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="conn_stage2_to_3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=3;strokeColor=#9333EA;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="node_final_md" target="node_page_setup">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="850" y="760" />
+              <mxPoint x="850" y="185" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -14,7 +14,7 @@ except ImportError:
     from api.models import PageDocument
 
 
-GEMINI_MODELS = ["gemini-2.0-flash", "gemini-1.5-flash"]
+GEMINI_MODELS = ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-flash-latest", "gemini-2.5-flash"]
 GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
 GEMINI_JSON_SCHEMA: dict[str, Any] = {

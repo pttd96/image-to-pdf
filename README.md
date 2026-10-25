@@ -32,6 +32,7 @@ image-to-pdf/
 
 Comprehensive system architecture and research documentation:
 - 🏛️ **[System Architecture & Digitization Wiki](docs/ARCHITECTURE.md)**: In-depth technical breakdown of the system architecture, evaluation of the 4 document digitization approaches tested, comparison matrix, and future computer-vision dewarping roadmap.
+- 📐 **Architecture Diagrams**: [word_pdf_pipeline.drawio](docs/word_pdf_pipeline.drawio) (compatible with Draw.io / diagrams.net) and [word_pdf_pipeline.excalidraw](docs/word_pdf_pipeline.excalidraw) (compatible with Excalidraw).
 - 📋 **[ADR-001: Initial Core Architecture](docs/ADR-001.md)**: Cloud Vision + FastAPI + `fpdf2` foundational decisions.
 - 📋 **[ADR-002: Evaluation of Digitization Paradigms](docs/ADR-002.md)**: Empirical findings, root cause analysis, and conclusions across all experimental approaches.
 
@@ -41,32 +42,42 @@ Comprehensive system architecture and research documentation:
 - **PDF Engine:** `fpdf2` with TrueType Unicode Roboto typography
 - **Security:** GCP Workload Identity Federation (keyless OIDC) + optional reCAPTCHA v3
 
-## Quick Start
+## Local Development & GCP Testing
 
-### Backend
+### 1. Connect Locally to GCP
+
+You can connect to Google Cloud using any of the following:
+
+- **Option A (Recommended & Fastest):** Use Application Default Credentials:
+  ```bash
+  gcloud auth application-default login
+  ```
+- **Option B (Service Account File):** Download your GCP service account JSON key and set in `.env`:
+  ```bash
+  GOOGLE_APPLICATION_CREDENTIALS="./service-account.json"
+  ```
+- **Option C (Gemini API Key only):** Set in `.env`:
+  ```bash
+  GEMINI_API_KEY="AIzaSy..."
+  ```
+
+### 2. Verify Your Connection
+
+Run the diagnostic test script:
 
 ```bash
-cd backend
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-
-# Set credentials (GEMINI_API_KEY for tables + structured layout, or GCP for Vision OCR)
-export GEMINI_API_KEY="your-gemini-api-key"
-export GOOGLE_APPLICATION_CREDENTIALS="path/to/service-account.json"
-export RECAPTCHA_SECRET_KEY="your-recaptcha-secret"
-
-uvicorn api.index:app --reload
+python test_local_gcp.py
 ```
 
-### Frontend
+This verifies both Gemini Flash API and Google Cloud Vision API with real-time test requests and latency measurements.
 
-Open `frontend/index.html` in a browser, or serve with any static server:
+### 3. Run the App Locally
 
 ```bash
-cd frontend
-npx serve .
+uvicorn api.index:app --reload --port 8000
 ```
+
+Open [http://localhost:8000](http://localhost:8000) in your browser.
 
 ## Cost
 

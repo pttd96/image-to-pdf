@@ -20,9 +20,15 @@ sys.path.insert(0, str(Path(__file__).parent))
 try:
     from ocr import extract_document_parallel, run_ocr_parallel
     from pdf import build_pdf
+    from dewarp import rectify_document_bytes
+    from transcribe import transcribe_image_to_markdown
+    from word_pdf import build_word_style_pdf
 except ImportError:
     from api.ocr import extract_document_parallel, run_ocr_parallel
     from api.pdf import build_pdf
+    from api.dewarp import rectify_document_bytes
+    from api.transcribe import transcribe_image_to_markdown
+    from api.word_pdf import build_word_style_pdf
 
 load_dotenv()
 
@@ -36,7 +42,11 @@ ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
 
 def get_gcp_credentials(request: Request = None):
     """
-    Load GCP credentials via Workload Identity Federation.
+    Load GCP credentials supporting:
+    1. Vercel Production: Workload Identity Federation via OIDC token
+    2. Local .env: Service account JSON string in GOOGLE_CREDENTIALS_JSON
+    3. Local File: Service account key file path in GOOGLE_APPLICATION_CREDENTIALS
+    4. Local CLI: gcloud auth application-default login (Application Default Credentials)
     """
     oidc_token = None
     if request:
@@ -44,22 +54,18 @@ def get_gcp_credentials(request: Request = None):
     if not oidc_token:
         oidc_token = os.getenv("VERCEL_OIDC_TOKEN")
 
-    print(f"[AUTH] OIDC token found: {'yes (len=' + str(len(oidc_token)) + ')' if oidc_token else 'no'}")
-
     if oidc_token:
-        # --- Vercel production: use Workload Identity ---
+        # --- Vercel production: use Workload Identity Federation ---
         provider = os.getenv("GCP_WORKLOAD_IDENTITY_PROVIDER", "").strip()
         sa_email = os.getenv("GCP_SERVICE_ACCOUNT", "").strip()
 
-        print(f"[AUTH] Provider: {provider or 'MISSING'}")
-        print(f"[AUTH] Service Account: {sa_email or 'MISSING'}")
+        print(f"[AUTH] Workload Identity: Provider={provider or 'MISSING'}, SA={sa_email or 'MISSING'}")
 
         if not provider:
             raise RuntimeError("Environment variable 'GCP_WORKLOAD_IDENTITY_PROVIDER' is not set.")
         if not sa_email:
             raise RuntimeError("Environment variable 'GCP_SERVICE_ACCOUNT' is not set.")
 
-        # google-auth's identity_pool requires a file or URL source.
         with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
             f.write(oidc_token)
             token_file = f.name
@@ -77,23 +83,42 @@ def get_gcp_credentials(request: Request = None):
                 "credential_source": {"file": token_file},
             }
         )
-    else:
-        # --- Local dev: use JSON service account key ---
+
+    # --- Local Option A: JSON string in GOOGLE_CREDENTIALS_JSON ---
+    raw_json = os.getenv("GOOGLE_CREDENTIALS_JSON", "").strip()
+    if raw_json:
         import json
         from google.oauth2 import service_account
-
-        raw = os.getenv("GOOGLE_CREDENTIALS_JSON")
-        if not raw:
-            req_headers = list(request.headers.keys()) if request else []
-            raise RuntimeError(
-                f"Missing GCP auth credentials. Neither OIDC token (headers: {req_headers}) "
-                "nor GOOGLE_CREDENTIALS_JSON is available."
-            )
-        info = json.loads(raw)
+        info = json.loads(raw_json)
         return service_account.Credentials.from_service_account_info(
             info,
             scopes=["https://www.googleapis.com/auth/cloud-platform"],
         )
+
+    # --- Local Option B: File path in GOOGLE_APPLICATION_CREDENTIALS ---
+    cred_file = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "").strip()
+    if cred_file and os.path.isfile(cred_file):
+        from google.oauth2 import service_account
+        return service_account.Credentials.from_service_account_file(
+            cred_file,
+            scopes=["https://www.googleapis.com/auth/cloud-platform"],
+        )
+
+    # --- Local Option C: gcloud auth application-default login (ADC) ---
+    try:
+        import google.auth
+        credentials, _ = google.auth.default(
+            scopes=["https://www.googleapis.com/auth/cloud-platform"]
+        )
+        return credentials
+    except Exception as adc_err:
+        raise RuntimeError(
+            "No GCP credentials found for local execution.\n"
+            "Choose one of the following methods to connect:\n"
+            "  1. Run: gcloud auth application-default login (Easiest)\n"
+            "  2. Set GOOGLE_APPLICATION_CREDENTIALS='path/to/key.json' in .env\n"
+            "  3. Set GOOGLE_CREDENTIALS_JSON='{...}' in .env"
+        ) from adc_err
 
 
 app = FastAPI(title="Image to PDF API", version="0.1.0")
@@ -174,17 +199,41 @@ async def convert(
                 detail="No OCR or extraction credentials configured. Please set GEMINI_API_KEY or GCP credentials.",
             )
 
-        print("[CONVERT] Running document extraction (Gemini Flash / Cloud Vision)...")
+        # --- Step 1: Geometric Rectification (OpenCV homography & deskew) ---
+        print("[CONVERT] Rectifying images (OpenCV perspective homography & deskew)...")
+        rectified_images = [rectify_document_bytes(img_bytes) for img_bytes in image_bytes_list]
+
+        # --- Step 2 & 3: Word-Style Transcription with Gemini Flash ---
+        if gemini_key:
+            print("[CONVERT] Transcribing documents to Word-Style Markdown via Gemini Flash...")
+            async with httpx.AsyncClient() as http_client:
+                tasks = [
+                    transcribe_image_to_markdown(http_client, img, gemini_key)
+                    for img in rectified_images
+                ]
+                markdown_pages = await asyncio.gather(*tasks)
+
+            if any(md.strip() for md in markdown_pages if md):
+                print(f"[CONVERT] Assembling Word-Grade vector PDF ({len(markdown_pages)} pages)...")
+                pdf_bytes = build_word_style_pdf(markdown_pages)
+                print(f"[CONVERT] Word-Grade PDF built successfully ({len(pdf_bytes)} bytes)")
+                return Response(
+                    content=pdf_bytes,
+                    media_type="application/pdf",
+                    headers={"Content-Disposition": "attachment; filename=document.pdf"},
+                )
+
+        # --- Fallback: Structured Typesetter via Cloud Vision / JSON blocks ---
+        print("[CONVERT] Fallback: Running Cloud Vision / legacy extraction...")
         extraction_results = await extract_document_parallel(
-            image_bytes_list=image_bytes_list,
+            image_bytes_list=rectified_images,
             credentials=credentials,
             gemini_api_key=gemini_key,
         )
         print(f"[CONVERT] Extraction finished. Results count: {len(extraction_results)}")
 
-        # --- Build multi-page PDF ---
         print("[CONVERT] Building PDF with fpdf2...")
-        pdf_bytes = build_pdf(image_bytes_list, extraction_results)
+        pdf_bytes = build_pdf(rectified_images, extraction_results)
         print(f"[CONVERT] PDF built successfully ({len(pdf_bytes)} bytes)")
 
         return Response(

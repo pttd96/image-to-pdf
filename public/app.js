@@ -124,6 +124,9 @@ convertBtn.addEventListener("click", async () => {
       throw new Error(msg);
     }
 
+    // Check for conversion warning (e.g. Gemini credits depleted, fallback to plain OCR)
+    const conversionWarning = response.headers.get("X-Conversion-Warning");
+
     // Trigger download
     const blob = await response.blob();
     const url = URL.createObjectURL(blob);
@@ -133,7 +136,11 @@ convertBtn.addEventListener("click", async () => {
     a.click();
     URL.revokeObjectURL(url);
 
-    showStatus("✅ PDF downloaded!", "success");
+    if (conversionWarning) {
+      showStatus(`⚠️ Downloaded with fallback: ${conversionWarning}`, "warning");
+    } else {
+      showStatus("✅ PDF downloaded with Word-grade layout & tables!", "success");
+    }
   } catch (err) {
     showStatus(`❌ ${err.message}`, "error");
   } finally {

@@ -136,10 +136,20 @@ async def _extract_with_gemini(
                     return None
 
                 return PageDocument.model_validate_json(text_content)
+            elif resp.status_code == 402:
+                last_error = (
+                    f"🚨 [BILLING ALERT] Gemini credits depleted (HTTP 402)! "
+                    f"Table extraction disabled. Recharge at https://aistudio.google.com"
+                )
+                print(f"\n{last_error}\n")
+                break
+            elif resp.status_code in (401, 403):
+                last_error = f"🚨 [AUTH ERROR] Gemini API key invalid (HTTP {resp.status_code}): {resp.text[:150]}"
+                print(f"\n{last_error}\n")
+                break
             else:
                 last_error = f"Gemini ({model}) HTTP {resp.status_code}: {resp.text[:200]}"
                 print(f"[OCR] {last_error}")
-                # If 404 or model not found, try next model
                 if resp.status_code == 404:
                     continue
         except Exception as e:

@@ -204,6 +204,7 @@ async def convert(
         rectified_images = [rectify_document_bytes(img_bytes) for img_bytes in image_bytes_list]
 
         # --- Step 2 & 3: Word-Style Transcription with Gemini Flash ---
+        conversion_warning = None
         if gemini_key:
             print("[CONVERT] Transcribing documents to Word-Style Markdown via Gemini Flash...")
             async with httpx.AsyncClient() as http_client:
@@ -222,6 +223,12 @@ async def convert(
                     media_type="application/pdf",
                     headers={"Content-Disposition": "attachment; filename=document.pdf"},
                 )
+            else:
+                conversion_warning = (
+                    "Gemini AI layout/table transcription failed (credits depleted or auth error). "
+                    "Output PDF was generated via plain OCR fallback without table structures."
+                )
+                print(f"\n⚠️  [CONVERT WARNING] {conversion_warning}\n")
 
         # --- Fallback: Structured Typesetter via Cloud Vision / JSON blocks ---
         print("[CONVERT] Fallback: Running Cloud Vision / legacy extraction...")
@@ -236,10 +243,17 @@ async def convert(
         pdf_bytes = build_pdf(rectified_images, extraction_results)
         print(f"[CONVERT] PDF built successfully ({len(pdf_bytes)} bytes)")
 
+        resp_headers = {
+            "Content-Disposition": "attachment; filename=document.pdf",
+        }
+        if conversion_warning:
+            resp_headers["X-Conversion-Warning"] = conversion_warning
+            resp_headers["Access-Control-Expose-Headers"] = "X-Conversion-Warning"
+
         return Response(
             content=pdf_bytes,
             media_type="application/pdf",
-            headers={"Content-Disposition": "attachment; filename=document.pdf"},
+            headers=resp_headers,
         )
     except HTTPException:
         raise

@@ -116,6 +116,22 @@ async def transcribe_image_to_markdown(
                             if markdown_result.endswith("```"):
                                 markdown_result = markdown_result[:-3].strip()
                             break
+            elif resp.status_code == 402:
+                print(
+                    f"\n🚨 [BILLING ALERT] Gemini API credits depleted (HTTP 402 Payment Required)!\n"
+                    f"   Model: {model_name}\n"
+                    f"   Details: {resp.text[:200]}\n"
+                    f"   👉 Table and Word-style layout extraction is disabled until credits are recharged.\n"
+                    f"   👉 Manage billing / API keys at: https://aistudio.google.com\n"
+                )
+                # No need to retry other models; the billing account is depleted
+                break
+            elif resp.status_code in (401, 403):
+                print(
+                    f"\n🚨 [AUTH ERROR] Gemini API key unauthorized or invalid (HTTP {resp.status_code})!\n"
+                    f"   Details: {resp.text[:200]}\n"
+                )
+                break
             else:
                 print(f"[TRANSCRIBE] {model_name} HTTP {resp.status_code}: {resp.text[:150]}")
         except Exception as e:
